@@ -37,6 +37,19 @@
         reverse_proxy octo-api:3001
     }
 
+    # /v2 without the trailing slash would otherwise fall through to the v1 SPA
+    # catch-all; send it to the mount so the app's relative asset base resolves.
+    redir /v2 /v2/ 301
+
+    # Second UI build, mounted alongside v1 at /. It carries its own design system
+    # and is served from the same root; the SPA fallback stays inside /v2 so it
+    # cannot swallow v1 routes.
+    handle /v2/* {
+        root * /srv
+        file_server
+        try_files {path} /v2/index.html
+    }
+
     # Static Vite build with SPA routing fallback
     handle {
         root * /srv
