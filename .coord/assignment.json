@@ -74,14 +74,14 @@
   "pins": {
     "acs": {
       "repo": "https://github.com/Pukujan/agent-custom-setup",
-      "revision": "38f8f52e8d210db3ce258bf911ebb560c6e0fe4c",
+      "revision": "3df982adc008b9caa4b3a9991f77486393c9a30b",
       "module": "modules/coordination/multi-agent-hotload/v0.1.0",
       "version": "0.1.0"
     },
     "pcm": {
       "repo": "https://github.com/Pukujan/project-continuity-modules",
-      "revision": "4e2385474b4af9249ca009cbdcb38c4498932475",
-      "cli_version": "0.6.0",
+      "revision": "85e6aa7a889b57aeef270213c37258194717e358",
+      "cli_version": "0.7.0",
       "protocol": "0.1.0-draft",
       "role": "full_stack",
       "required_features": [
@@ -97,7 +97,7 @@
     },
     "cgm": {
       "repo": "https://github.com/Pukujan/content-generation-modules",
-      "revision": "6831f91e165b62d719c05eb492f7375fa932b560",
+      "revision": "5c8c5f167098d04cf96fb1fe449880001a1edd14",
       "version": "0.5.12",
       "role": "full_stack",
       "modules": [
@@ -139,6 +139,11 @@
         "generated_artifact_filenames": "human-output-naming",
         "contract": "docs/writing-routing.json + docs/ACS_VERIFY.md; required_load and always-on inject apply after validation"
       }
+    },
+    "oio": {
+      "repo": "https://github.com/Pukujan/observational-issue-ops",
+      "revision": "402a46ec9544fddacb8cc366b07c7fc44b096b69",
+      "version": "0.1.0"
     }
   },
   "ticket_links": {

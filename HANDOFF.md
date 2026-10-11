@@ -16,9 +16,10 @@ Do not claim a queued job executed or a branch-only file is installed.
 
 ## Helpers
 
-- ACS: `38f8f52e8d210db3ce258bf911ebb560c6e0fe4c`.
-- PCM: `4e2385474b4af9249ca009cbdcb38c4498932475`.
-- CGM 0.5.12: `6831f91e165b62d719c05eb492f7375fa932b560`, all eight modules.
+- ACS 0.2.0 (hot-loader module v0.1.0): `3df982adc008b9caa4b3a9991f77486393c9a30b`.
+- PCM 0.7.0: `85e6aa7a889b57aeef270213c37258194717e358`.
+- CGM 0.5.12: `5c8c5f167098d04cf96fb1fe449880001a1edd14`, all eight modules.
+- OIO 0.1.0: `402a46ec9544fddacb8cc366b07c7fc44b096b69`.
 
 Use helper coordination and continuity to support delivery. The owner retains product authority.
 Use multiple Luna workers for independent work where available; the main agent integrates and verifies results.

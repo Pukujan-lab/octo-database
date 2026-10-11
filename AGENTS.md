@@ -44,9 +44,10 @@ ACS, PCM, and CGM are helpers, not product authorities. Use them only to the ext
 
 Pinned versions currently used by repository validation:
 
-- ACS hot-loader v0.1.0 @ `38f8f52e8d210db3ce258bf911ebb560c6e0fe4c`.
-- PCM @ `4e2385474b4af9249ca009cbdcb38c4498932475`.
-- CGM 0.5.12 @ `6831f91e165b62d719c05eb492f7375fa932b560`.
+- ACS 0.2.0 hot-loader module v0.1.0 @ `3df982adc008b9caa4b3a9991f77486393c9a30b`.
+- PCM 0.7.0 @ `85e6aa7a889b57aeef270213c37258194717e358`.
+- CGM 0.5.12 @ `5c8c5f167098d04cf96fb1fe449880001a1edd14`.
+- OIO 0.1.0 @ `402a46ec9544fddacb8cc366b07c7fc44b096b69`.
 
 ## Git and delivery
 
