@@ -44,7 +44,10 @@ export function ConfirmGate({
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
-        <code className="num rounded border border-primary/45 bg-primary/10 px-2.5 py-1 text-sm font-semibold tracking-[0.3em] text-primary">
+        <code
+          data-testid="confirm-code-value"
+          className="num rounded border border-primary/45 bg-primary/10 px-2.5 py-1 text-sm font-semibold tracking-[0.3em] text-primary"
+        >
           {loading && !code ? "······" : (code ?? "unavailable")}
         </code>
         <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={onRefresh} disabled={loading}>

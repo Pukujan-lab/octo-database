@@ -16,7 +16,7 @@ test.describe('Operations page', () => {
   test('shows job state and activity, and completes a worker pass', async ({ page }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
 
     // Seed one real image so a thumbnail job has work to do.
     const photo = join(tmpdir(), 'ops-e2e-photo.png');
@@ -28,14 +28,17 @@ test.describe('Operations page', () => {
         .png()
         .toBuffer()
     );
-    await page.setInputFiles('input[type="file"]', photo);
+    await page.locator('[data-testid="file-upload"]').setInputFiles(photo);
     await expect(page.getByText('ops-e2e-photo.png').first()).toBeVisible();
-    await page.getByRole('button', { name: 'Operations', exact: true }).click();
+    await page
+      .locator('[data-testid="app-nav"]')
+      .getByRole('button', { name: 'Operations', exact: true })
+      .click();
 
     // The operations section is present with its counters.
-    await expect(page.getByRole('heading', { name: /Operations/ })).toBeVisible();
-    await expect(page.getByText(/Queued:/)).toBeVisible();
-    await expect(page.getByText(/Failed:/)).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Jobs', exact: true })).toBeVisible();
+    await expect(page.getByText('Queued', { exact: true })).toBeVisible();
+    await expect(page.getByText('Failed', { exact: true })).toBeVisible();
 
     // Enqueue a thumbnail job for the uploaded file via the API surface the UI uses.
     const enqueued = await page.evaluate(async () => {

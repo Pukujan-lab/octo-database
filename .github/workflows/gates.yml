@@ -89,7 +89,7 @@ jobs:
       - name: Install frontend dependencies
         # The e2e webServer starts the frontend dev server, so its tree must be
         # installed even though the root install does not cover it.
-        run: npm ci --prefix frontend
+        run: npm ci --prefix frontend-v2
 
       - name: TypeScript type check
         run: npm run typecheck

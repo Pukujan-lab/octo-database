@@ -5,23 +5,32 @@ test('edits one key allowance without minting a new secret', async ({ page }) =>
   await page.goto('/');
   await page.getByRole('button', { name: 'Continue as Guest' }).click();
   await page.getByRole('button', { name: 'Access', exact: true }).click();
-  await page.fill('input[placeholder="e.g. Ingest Agent"]', 'Allowance Agent');
-  await typeConfirmCode(page);
-  await page.getByRole('button', { name: 'Generate API Key' }).click();
-  await expect(page.locator('section.one-time-notice').getByText('New API Key Minted')).toBeVisible();
 
-  const editor = page.locator('form[data-form="key-allowances"]');
-  // The allowance editor is collapsed behind a dropdown; open it before editing.
-  await editor.locator('summary.dropdown-summary').click();
-  const deletion = editor.locator('input[value="delete"]');
+  await page.getByRole('button', { name: 'Mint a key' }).first().click();
+  const dialog = page.locator('[data-testid="key-mint-form"]');
+  await expect(dialog).toBeVisible();
+  await page.locator('#key-name').fill('Allowance Agent');
+  await typeConfirmCode(page);
+  await page.getByRole('button', { name: 'Mint key' }).click();
+  await expect(page.locator('[data-testid="one-time-secret"]')).toBeVisible();
+
+  // The allowance editor is collapsed behind a Radix collapsible; open it
+  // before editing. The key row's editor is scoped to its row so multiple
+  // editors never collide.
+  const editor = page.locator('table tbody tr').filter({ hasText: 'Allowance Agent' });
+  await editor.getByRole('button', { name: /edit/ }).click();
+  const deletion = editor.locator('input[id$="-scope-delete"]');
   await expect(deletion).not.toBeChecked();
-  await deletion.check();
+  // The checkbox itself is visually hidden (sr-only); the visible label is the
+  // click target a person uses.
+  await editor.locator('label:has(input[id$="-scope-delete"])').click();
   await typeConfirmCode(page);
-  await editor.getByRole('button', { name: 'Save' }).click();
+  await editor.getByRole('button', { name: 'Save allowances' }).click();
 
-  await expect(page.getByText('Allowances saved')).toBeVisible();
-  await page.locator('form[data-form="key-allowances"] summary.dropdown-summary').click();
-  await expect(page.locator('form[data-form="key-allowances"] input[value="delete"]')).toBeChecked();
-  await expect(page.locator('form[data-form="key-allowances"] input[value="read"]')).toBeChecked();
-  await expect(page.locator('section.one-time-notice')).toHaveCount(1);
+  // The save confirms via a toast, and the editor reflects the new set.
+  await expect(page.getByText(`Allowances updated for Allowance Agent`)).toBeVisible();
+  await editor.getByRole('button', { name: /edit/ }).click();
+  await expect(editor.locator('input[id$="-scope-delete"]')).toBeChecked();
+  await expect(editor.locator('input[id$="-scope-read"]')).toBeChecked();
+  await expect(page.locator('[data-testid="one-time-secret"]')).toHaveCount(1);
 });

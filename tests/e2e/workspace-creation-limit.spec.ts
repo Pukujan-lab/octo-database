@@ -70,29 +70,38 @@ test.describe('Workspace creation daily limit', () => {
   test('the refusal is shown in the create modal', async ({ page }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
     // Guest login kicks off an async workspace load that re-renders the whole
     // app; opening the modal before it settles lets that render wipe the modal's
     // inputs. Wait for the network to go quiet so the app is idle first.
     await page.waitForLoadState('networkidle');
 
-    // First creation succeeds through the UI.
-    await page.click('button:has-text("New Workspace")');
-    await expect(page.getByRole('dialog').getByText('New Workspace')).toBeVisible();
-    await page.getByRole('dialog').locator('input[name="name"]').fill(`UI First ${Date.now()}`);
-    await typeConfirmCode(page, page.getByRole('dialog'));
-    await page.getByRole('dialog').getByRole('button', { name: 'Create Workspace' }).click();
-    await expect(page.locator('section.one-time-notice').getByText('Workspace created')).toBeVisible();
-    await page.locator('section.one-time-notice').getByRole('button', { name: 'Done' }).click();
-    await expect(page.locator('section.one-time-notice')).toHaveCount(0);
+    const newWorkspace = page.getByRole('button', { name: 'New Workspace', exact: true });
+    const dialog = page.getByRole('dialog');
+
+    // First creation succeeds through the UI. The minted workspace key is shown
+    // once inside the still-open dialog, so dismiss it before closing.
+    await newWorkspace.click();
+    await expect(dialog.getByRole('heading', { name: 'New workspace' })).toBeVisible();
+    await dialog.locator('#ws-name').fill(`UI First ${Date.now()}`);
+    await typeConfirmCode(page, dialog);
+    await dialog.getByRole('button', { name: 'Create workspace' }).click();
+    const secret = dialog.locator('[data-testid="one-time-secret"]');
+    await expect(secret).toBeVisible();
+    await expect(secret.getByText('Workspace key', { exact: true })).toBeVisible();
+    await secret.getByRole('button', { name: 'Dismiss' }).click();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
 
     // Second creation within the same day is refused, and the modal says so.
-    await page.click('button:has-text("New Workspace")');
-    await expect(page.getByRole('dialog').getByText('New Workspace')).toBeVisible();
-    await page.getByRole('dialog').locator('input[name="name"]').fill(`UI Second ${Date.now()}`);
-    await typeConfirmCode(page, page.getByRole('dialog'));
-    await page.getByRole('dialog').getByRole('button', { name: 'Create Workspace' }).click();
-    await expect(page.getByRole('dialog').getByRole('alert')).toContainText(/WORKSPACE_DAILY_LIMIT/);
+    await newWorkspace.click();
+    await expect(dialog.getByRole('heading', { name: 'New workspace' })).toBeVisible();
+    await dialog.locator('#ws-name').fill(`UI Second ${Date.now()}`);
+    await typeConfirmCode(page, dialog);
+    await dialog.getByRole('button', { name: 'Create workspace' }).click();
+    await expect(
+      page.getByText('This account has used its workspace allowance for today'),
+    ).toBeVisible();
   });
 
   // Metamorphic: change the acting principal; the claim (one per day) holds per
