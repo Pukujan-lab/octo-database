@@ -2,6 +2,8 @@
 
 > Date: 2026-10-05 · Method: five specialist researchers (Postgres+pgvector, DuckDB, Parquet/lakehouse, graph, cross-cutting multi-tenancy + economics) plus an adversarial synthesis pass.
 > Per-engine structured findings (the raw JSON the specialists returned) live beside this file in `docs/research/2026-10-05-scaling-data-engines/`.
+>
+> **Scope note (added 2026-10-11):** this report reasons about the **control plane** — the `octo.*` shared tables, `workspace_id` column, and RESTRICTIVE RLS. The shipped **data plane** is different by design (Slice 20: one real Postgres database per workspace) and is covered in the companion `2026-10-11-tenancy-capacity-dbw-and-bucket-layout.md`. Read bottom-line #2 below as a statement about the control-plane tier, not about workspace data.
 
 ---
 
