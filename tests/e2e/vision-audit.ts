@@ -30,7 +30,10 @@ export async function auditPage(
     return null;
   }
 
-  const screenshot = await page.screenshot({ fullPage: true });
+  // Views animate in (fade-rise), so a screenshot taken immediately renders the
+  // panel half-transparent and the audit judges a transient frame. Fast-forward
+  // finite animations to their end state so the model sees the settled screen.
+  const screenshot = await page.screenshot({ fullPage: true, animations: 'disabled' });
   const result = await verifyUiScreenshotWithVision(screenshot, screenName);
 
   console.log(`[vision-audit] ${screenName} — model=${result.modelUsed} score=${result.score} passed=${result.passed}`);

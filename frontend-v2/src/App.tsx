@@ -41,7 +41,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
-      <Sonner position="bottom-right" closeButton />
+      <Sonner position="bottom-right" />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />

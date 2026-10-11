@@ -53,13 +53,16 @@ export function OverviewView({
         <div className="relative flex flex-col gap-6 p-6 sm:p-7 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <StatusPill tone="primary">{workspace.role}</StatusPill>
+              {workspace.isOwner ? (
+                <StatusPill tone="success">owner</StatusPill>
+              ) : (
+                <StatusPill tone="primary">{workspace.role}</StatusPill>
+              )}
               {isGuest ? (
                 <StatusPill tone="warning" dot>
                   guest session
                 </StatusPill>
               ) : null}
-              {workspace.isOwner ? <StatusPill tone="success">owner</StatusPill> : null}
             </div>
             <h2 className="font-display text-2xl font-semibold leading-tight">{workspace.name}</h2>
             <p className="text-sm leading-relaxed text-muted-foreground">
