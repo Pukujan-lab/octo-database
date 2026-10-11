@@ -3,7 +3,7 @@
   "system": "content-generation-modules",
   "helper_repository": "https://github.com/Pukujan/content-generation-modules",
   "helper_version": "0.5.12",
-  "helper_commit": "6831f91e165b62d719c05eb492f7375fa932b560",
+  "helper_commit": "5c8c5f167098d04cf96fb1fe449880001a1edd14",
   "helper_pin_note": "FULL CGM 0.5.12 required: all eight modules. Validate with pinned scripts/validate_content_system.py; apply writing routing at agent boot.",
   "modules": [
     "brand-foundation",

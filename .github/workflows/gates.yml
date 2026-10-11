@@ -208,7 +208,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone --quiet https://github.com/Pukujan/project-continuity-modules.git "$VALIDATION_ROOT/pcm"
-          git -C "$VALIDATION_ROOT/pcm" checkout --quiet 4e2385474b4af9249ca009cbdcb38c4498932475
+          git -C "$VALIDATION_ROOT/pcm" checkout --quiet 85e6aa7a889b57aeef270213c37258194717e358
           PYTHONPATH="$VALIDATION_ROOT/pcm/src" "$VALIDATION_ROOT/venv/bin/python" -m continuity validate --root .
 
       - name: Validate full CGM adapter
@@ -216,7 +216,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone --quiet https://github.com/Pukujan/content-generation-modules.git "$VALIDATION_ROOT/cgm"
-          git -C "$VALIDATION_ROOT/cgm" checkout --quiet 6831f91e165b62d719c05eb492f7375fa932b560
+          git -C "$VALIDATION_ROOT/cgm" checkout --quiet 5c8c5f167098d04cf96fb1fe449880001a1edd14
           "$VALIDATION_ROOT/venv/bin/python" "$VALIDATION_ROOT/cgm/scripts/validate_content_system.py" \
             --root "$VALIDATION_ROOT/cgm" \
             --adapter .content-system \
@@ -227,7 +227,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone --quiet https://github.com/Pukujan/agent-custom-setup.git "$VALIDATION_ROOT/acs"
-          git -C "$VALIDATION_ROOT/acs" checkout --quiet 38f8f52e8d210db3ce258bf911ebb560c6e0fe4c
+          git -C "$VALIDATION_ROOT/acs" checkout --quiet 3df982adc008b9caa4b3a9991f77486393c9a30b
           "$VALIDATION_ROOT/venv/bin/python" "$VALIDATION_ROOT/acs/modules/coordination/multi-agent-hotload/v0.1.0/scripts/hotload_check.py" \
             --root "$VALIDATION_ROOT/acs/modules/coordination/multi-agent-hotload/v0.1.0" \
             --assignment "$GITHUB_WORKSPACE/.coord/assignment.json" \
