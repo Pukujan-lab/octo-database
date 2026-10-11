@@ -79,9 +79,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    // The server puts its machine code in `error`; fall back to the status text.
-    const code = body.error ?? res.statusText;
-    throw new ApiError(FRIENDLY[code] ?? code, res.status, body.error);
+    // The server answers with "MACHINE_CODE: human sentence" (or a bare code).
+    // Split off the code so FRIENDLY lookups and errorCode() comparisons match.
+    const raw = body.error ?? res.statusText;
+    const sep = raw.indexOf(":");
+    const code = sep === -1 ? raw : raw.slice(0, sep);
+    throw new ApiError(FRIENDLY[code] ?? raw, res.status, code);
   }
 
   if (res.status === 204) return undefined as T;

@@ -26,7 +26,7 @@ export async function setConfirmSecret(
 /** Types the one-time code the form is showing. */
 export async function typeConfirmCode(page: Page, scope?: Locator): Promise<void> {
   const root = scope ?? page.locator('body');
-  const shown = root.locator('.confirm-code strong');
+  const shown = root.locator('[data-testid="confirm-code-value"]');
   await shown.waitFor({ state: 'visible' });
-  await root.getByLabel('Type the code', { exact: true }).fill(((await shown.innerText()) ?? '').trim());
+  await root.locator('[data-testid="confirm-code"]').fill(((await shown.innerText()) ?? '').trim());
 }

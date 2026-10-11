@@ -41,10 +41,8 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
-      <Sonner position="bottom-right" closeButton />
-      {/* Vite's BASE_URL carries the mount path ("/v2/"); the router needs it
-          without the trailing slash so nested routes resolve under the mount. */}
-      <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+      <Sonner position="bottom-right" />
+      <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
           {/* Tokens may themselves contain slashes, so the splat is decoded whole. */}

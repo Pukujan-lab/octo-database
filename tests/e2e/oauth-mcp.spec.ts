@@ -244,7 +244,8 @@ test.describe('OAuth 2.1 authorization for /mcp', () => {
     await page.addInitScript((token) => localStorage.setItem('octo_token', token), guest.sessionToken);
     await page.goto('/#oauth_return=' + encodeURIComponent('https://evil.example/oauth/authorize'));
     await expect(page).toHaveURL(/localhost:3000\/$/);
-    await expect(page.getByRole('heading', { name: 'Personal (Guest)' })).toBeVisible();
+    // The workspace name is the shell's h1 and the overview's h2, so match the first.
+    await expect(page.getByRole('heading', { name: 'Personal (Guest)' }).first()).toBeVisible();
   });
 
   test('a wrong PKCE verifier is refused', async ({ request }) => {

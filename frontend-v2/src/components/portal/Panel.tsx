@@ -26,7 +26,7 @@ export function Panel({
             {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
             {title ? <h2 className="truncate font-display text-[15px] font-semibold">{title}</h2> : null}
           </div>
-          {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
+          {action ? <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">{action}</div> : null}
         </header>
       ) : null}
       <div className={cn("min-h-0 flex-1", bodyClassName)}>{children}</div>

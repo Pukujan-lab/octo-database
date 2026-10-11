@@ -142,7 +142,7 @@ test.describe('MFA step-up for creation and minting', () => {
   test('the create modal asks for a code once MFA is enabled', async ({ page, request }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
     await page.waitForLoadState('networkidle');
 
     // Enroll through the API on the same session, then reload so the dashboard
@@ -153,14 +153,15 @@ test.describe('MFA step-up for creation and minting', () => {
     await page.reload();
     await page.waitForLoadState('networkidle');
 
-    await page.click('button:has-text("New Workspace")');
-    await expect(page.getByRole('dialog').getByText('New Workspace')).toBeVisible();
-    await page.getByRole('dialog').locator('input[name="name"]').fill(`UI MFA Create ${Date.now()}`);
-    await page.getByRole('dialog').locator('input[name="mfaCode"]').fill(generateSync({ secret }));
-    await typeConfirmCode(page, page.getByRole('dialog'));
-    await page.getByRole('dialog').getByRole('button', { name: 'Create Workspace' }).click();
+    const dialog = page.getByRole('dialog');
+    await page.getByRole('button', { name: 'New Workspace', exact: true }).click();
+    await expect(dialog.getByRole('heading', { name: 'New workspace' })).toBeVisible();
+    await dialog.locator('#ws-name').fill(`UI MFA Create ${Date.now()}`);
+    await dialog.locator('[data-testid="mfa-code"]').fill(generateSync({ secret }));
+    await typeConfirmCode(page, dialog);
+    await dialog.getByRole('button', { name: 'Create workspace' }).click();
 
-    // Creation closes the modal and shows the one-time key as an inline notice.
-    await expect(page.locator('section.one-time-notice').getByText('Workspace created')).toBeVisible();
+    // Creation shows the one-time workspace key inside the still-open dialog.
+    await expect(dialog.locator('[data-testid="one-time-secret"]')).toBeVisible();
   });
 });
