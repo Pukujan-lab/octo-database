@@ -161,7 +161,11 @@ export function LoginScreen({
                   <Button
                     variant="outline"
                     size="lg"
-                    className="w-full gap-2"
+                    // A blanket opacity dims the label toward the panel until it can no
+                    // longer be read. This control exists only to report that Google
+                    // auth is off, so keep it legible and signal inactivity with a
+                    // dashed border instead of faded text.
+                    className="w-full gap-2 disabled:opacity-100 disabled:border-dashed disabled:bg-transparent disabled:text-muted-foreground"
                     data-testid="login-google"
                     disabled
                     title="Google sign-in is not configured on this server"

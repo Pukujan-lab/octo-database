@@ -12,7 +12,7 @@ test.describe('Agent tokens', () => {
   test('read-only agent token is scoped, attributable, and revocable', async ({ page }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
 
     const result = await page.evaluate(async () => {
       const token = localStorage.getItem('octo_token');
@@ -105,7 +105,7 @@ test.describe('Agent tokens', () => {
   test('unknown scopes are rejected at mint time', async ({ page }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
 
     const status = await page.evaluate(async () => {
       const token = localStorage.getItem('octo_token');

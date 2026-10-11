@@ -13,10 +13,10 @@ test('uploads an arbitrary file and downloads identical bytes from the catalog',
   try {
     await page.goto('/');
     await page.getByText('Continue as Guest').click();
-    await expect(page.getByText('Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
 
     await page.getByRole('button', { name: 'Files', exact: true }).click();
-    await page.getByLabel('Upload file').setInputFiles(sourcePath);
+    await page.locator('[data-testid="file-upload"]').setInputFiles(sourcePath);
     const fileRow = page.getByRole('row').filter({ hasText: fileName });
     await expect(fileRow).toBeVisible();
 

@@ -23,7 +23,13 @@ import { exemptFromDailyLimit } from './workspace-quota';
 
 /** Selects a workspace by name from the dashboard's workspace switcher. */
 async function selectWorkspace(page: Page, name: string): Promise<void> {
-  await page.locator('#workspace-select').selectOption({ label: name });
+  // The picker labels each option "<name> — /<slug>", so resolve the value first.
+  const value = await page
+    .locator('#workspace-picker option')
+    .filter({ hasText: name })
+    .first()
+    .getAttribute('value');
+  await page.locator('#workspace-picker').selectOption(value!);
 }
 
 test.describe('Workspace data plane', () => {
@@ -31,23 +37,26 @@ test.describe('Workspace data plane', () => {
     test.setTimeout(180000);
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
 
     // 1. Create a workspace from the UI; a key is auto-provisioned and shown once.
-    await page.click('button:has-text("New Workspace")');
-    await expect(page.getByRole('dialog').getByText('New Workspace')).toBeVisible();
+    await page.getByRole('button', { name: 'New Workspace', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: 'New workspace' })).toBeVisible();
     const wsName = `Lifecycle ${Date.now()}`;
-    await page.getByRole('dialog').locator('input[name="name"]').fill(wsName);
-    await typeConfirmCode(page, page.getByRole('dialog'));
-    await page.getByRole('dialog').getByRole('button', { name: 'Create Workspace' }).click();
+    await dialog.locator('#ws-name').fill(wsName);
+    await typeConfirmCode(page, dialog);
+    await dialog.getByRole('button', { name: 'Create workspace' }).click();
 
-    // 2. The one-time workspace key appears as a dismissible notice (the dialog
-    //    auto-closes), and the new workspace is already the active one.
-    await expect(page.locator('section.one-time-notice').getByText('Workspace created')).toBeVisible();
-    await expect(page.locator('section.one-time-notice').getByText(/octo_live_ws_/)).toBeVisible();
+    // 2. The one-time workspace key appears inside the still-open dialog, and the
+    //    new workspace is already the active one.
+    const keyNotice = dialog.locator('[data-testid="one-time-secret"]');
+    await expect(keyNotice.getByText('Workspace key', { exact: true })).toBeVisible();
+    await expect(keyNotice.getByText(/octo_live_ws_/)).toBeVisible();
     await expect(page.locator('h1')).toContainText(wsName);
-    await page.locator('section.one-time-notice').getByRole('button', { name: 'Done' }).click();
-    await expect(page.locator('section.one-time-notice')).toHaveCount(0);
+    await keyNotice.getByRole('button', { name: 'Dismiss' }).click();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
 
     const wsId = await page.evaluate(async (name: string) => {
       const token = localStorage.getItem('octo_token');
@@ -64,11 +73,12 @@ test.describe('Workspace data plane', () => {
     await selectWorkspace(page, wsName);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'New text file' }).click();
-    await page.fill('input[placeholder="notes.txt"]', 'lifecycle.txt');
-    await page.fill('textarea[placeholder="Write something useful…"]', 'round-trip payload');
-    await page.getByRole('button', { name: 'Save file' }).click();
+    const textDialog = page.getByRole('dialog');
+    await textDialog.locator('#text-file-name').fill('lifecycle.txt');
+    await textDialog.locator('#text-file-body').fill('round-trip payload');
+    await textDialog.getByRole('button', { name: 'Create file' }).click();
     await page.getByRole('button', { name: 'Files', exact: true }).click();
-    await expect(page.getByRole('cell', { name: 'lifecycle.txt', exact: true })).toBeVisible();
+    await expect(page.getByText('lifecycle.txt', { exact: true })).toBeVisible();
 
     // 4. Archive it: queue the job and run the worker.
     const archiveStatus = await page.evaluate(async (workspaceId: string) => {
@@ -126,10 +136,10 @@ test.describe('Workspace data plane', () => {
 
     // 6. Delete the workspace through the confirmation-secret gate.
     await page.getByRole('button', { name: 'Access', exact: true }).click();
-    await page.click('button:has-text("Delete Workspace")');
-    await expect(page.getByRole('dialog').getByRole('heading', { name: `Delete ${wsName}?` })).toBeVisible();
-
-    await expect(page.getByRole('dialog').getByLabel(/to confirm/)).toBeVisible();
+    const settings = page
+      .locator('section.panel')
+      .filter({ has: page.getByRole('heading', { name: 'Settings' }) });
+    await settings.getByRole('button', { name: 'Delete workspace', exact: true }).click();
 
     const slug = await page.evaluate(async (workspaceId: string) => {
       const token = localStorage.getItem('octo_token');
@@ -138,17 +148,24 @@ test.describe('Workspace data plane', () => {
       ).json();
       return (list as { id: string; slug: string }[]).find((w) => w.id === workspaceId)!.slug;
     }, wsId);
-    await page.getByRole('dialog').getByLabel(/to confirm/).fill(slug);
-    await typeConfirmCode(page, page.getByRole('dialog'));
-    await page.getByRole('dialog').getByRole('button', { name: 'Delete workspace' }).click();
+    const deleteSlug = settings.locator('#delete-slug');
+    await expect(deleteSlug).toBeVisible();
+    await deleteSlug.fill(slug);
+    await typeConfirmCode(page, settings);
+    await settings.getByRole('button', { name: `Delete ${wsName}` }).click();
 
-    await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15000 });
+    // The guest's personal workspace remains, so the app stays signed in and the
+    // deleted workspace disappears from the picker.
+    await expect(page.getByText(`Workspace ${slug} deleted`)).toBeVisible();
+    await expect(page.locator('#workspace-picker option').filter({ hasText: wsName })).toHaveCount(0, {
+      timeout: 15000,
+    });
   });
 
   test('MR-1 idempotent create: a duplicate create leaves exactly one workspace', async ({ page }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
     await exemptFromDailyLimit(page);
 
     const result = await page.evaluate(async () => {
@@ -190,7 +207,7 @@ test.describe('Workspace data plane', () => {
   test('MR-3 & MR-7: a workspace key is pinned and can never delete a workspace', async ({ page }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
     await exemptFromDailyLimit(page);
 
     const result = await page.evaluate(async () => {

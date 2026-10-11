@@ -2,15 +2,14 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
-// The app is a same-origin client of the Octo API, mounted at /v2/ alongside the
-// v1 UI at /. `base` must match the mount path so asset URLs and the router
-// basename line up; in dev the same base applies and the API routes are proxied
-// to the Node service on :3001.
+// The app is a same-origin client of the Octo API, served from the site root.
+// `base` stays default ("/") so asset URLs and the router basename line up; in
+// dev the server runs on :3000 (the port the Playwright e2e suite expects) and
+// proxies the API routes to the Node service on :3001.
 export default defineConfig(() => ({
-  base: "/v2/",
   server: {
     host: "::",
-    port: 8080,
+    port: 3000,
     proxy: {
       "/api": {
         target: "http://localhost:3001",
@@ -42,7 +41,7 @@ export default defineConfig(() => ({
     },
   },
   build: {
-    outDir: path.resolve(__dirname, "../dist/v2"),
+    outDir: path.resolve(__dirname, "../dist"),
     emptyOutDir: true,
   },
 }));

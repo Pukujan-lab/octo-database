@@ -19,7 +19,7 @@ test.describe('Scoped Share Links', () => {
     // --- Owner signs in, uploads media, and creates a read-only share ---
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
 
     const photo = join(tmpdir(), 'share-e2e-photo.png');
     writeFileSync(
@@ -30,18 +30,17 @@ test.describe('Scoped Share Links', () => {
         .png()
         .toBuffer()
     );
-    await page.setInputFiles('input[type="file"]', photo);
+    await page.locator('[data-testid="file-upload"]').setInputFiles(photo);
     await expect(page.getByText('share-e2e-photo.png').first()).toBeVisible();
 
     await page.getByRole('button', { name: 'Access', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Share links' })).toBeVisible();
-    await page.getByRole('button', { name: 'Create link' }).click();
-    await expect(page.getByText('Copy this link now')).toBeVisible();
+    // "Share links" is a substring of the empty state's "No share links".
+    await expect(page.getByRole('heading', { name: 'Share links', exact: true })).toBeVisible();
+    // The toolbar and the empty state both offer "Create link"; the toolbar is first.
+    await page.getByRole('button', { name: 'Create link' }).first().click();
+    await expect(page.getByText('Share URL')).toBeVisible();
 
-    const shareUrl = await page
-      .locator('text=/\\/share\\/octo_share_/')
-      .first()
-      .innerText();
+    const shareUrl = await page.locator('[data-testid="one-time-secret"] p.num').first().innerText();
     const token = shareUrl.trim().split('/share/')[1];
     expect(token).toBeTruthy();
     expect(token.startsWith('octo_share_')).toBe(true);
@@ -51,8 +50,8 @@ test.describe('Scoped Share Links', () => {
     const recipientPage = await recipient.newPage();
     await recipientPage.goto(`/share/${token}`);
 
-    await expect(recipientPage.getByRole('heading', { name: /Shared Album/ })).toBeVisible();
-    await expect(recipientPage.getByText('Permission: read')).toBeVisible();
+    await expect(recipientPage.getByRole('heading', { name: /read-only/ })).toBeVisible();
+    await expect(recipientPage.getByText('read', { exact: true })).toBeVisible();
 
     // The recipient sees the shared media...
     const sharedThumb = recipientPage.locator('img[alt="share-e2e-photo.png"]');
@@ -69,9 +68,9 @@ test.describe('Scoped Share Links', () => {
     );
 
     // ...but no workspace, member, key, or admin surface is reachable.
-    await expect(recipientPage.getByText('Workspace Control Dashboard')).toHaveCount(0);
-    await expect(recipientPage.getByText('API Keys', { exact: false })).toHaveCount(0);
-    await expect(recipientPage.getByText('File Catalog', { exact: false })).toHaveCount(0);
+    await expect(recipientPage.locator('[data-testid="app-nav"]')).toHaveCount(0);
+    await expect(recipientPage.getByText('API keys', { exact: false })).toHaveCount(0);
+    await expect(recipientPage.getByText('File catalog', { exact: false })).toHaveCount(0);
 
     const workspaceProbe = await recipientPage.request.get('/api/workspaces');
     expect(workspaceProbe.status()).toBe(401);
@@ -79,7 +78,8 @@ test.describe('Scoped Share Links', () => {
     expect(keyProbe.status()).toBe(401);
 
     // --- Owner revokes; the recipient's access dies immediately ---
-    await page.click('button:has-text("Revoke")');
+    await page.getByRole('button', { name: /^Actions for share / }).click();
+    await page.getByRole('menuitem', { name: 'Revoke' }).click();
     await expect(page.getByText('Revoked')).toBeVisible();
 
     const afterRevoke = await recipientPage.request.get(`/api/public/shares/${token}`);

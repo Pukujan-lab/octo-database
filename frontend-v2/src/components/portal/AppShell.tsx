@@ -105,8 +105,11 @@ export function AppShell({
                   <p className="truncate font-display text-sm font-semibold">{workspace.name}</p>
                   <p className="num truncate text-[11px] text-muted-foreground">/{workspace.slug}</p>
                   <div className="flex flex-wrap items-center gap-1.5 pt-2">
-                    <StatusPill tone="muted">{workspace.role}</StatusPill>
-                    {workspace.isOwner ? <StatusPill tone="primary">owner</StatusPill> : null}
+                    {workspace.isOwner ? (
+                      <StatusPill tone="primary">owner</StatusPill>
+                    ) : (
+                      <StatusPill tone="muted">{workspace.role}</StatusPill>
+                    )}
                   </div>
                 </div>
               ) : (

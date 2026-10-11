@@ -96,7 +96,6 @@ export function FilesView({ workspaceId, data }: { workspaceId: string; data: Wo
             <NewTextFileDialog workspaceId={workspaceId} onCreated={data.reload} variant="outline" />
           </>
         }
-        bodyClassName="min-h-[260px]"
       >
         {data.files.isError ? (
           <ErrorState title="Could not load files" detail={errorMessage(data.files.error)} onRetry={() => data.files.refetch()} />
@@ -221,8 +220,9 @@ export function FilesView({ workspaceId, data }: { workspaceId: string; data: Wo
 
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
         <HardDrive className="h-3.5 w-3.5 shrink-0" />
-        <span className="num">{files.length}</span> objects · <span className="num">{formatBytes(totalBytes)}</span>{" "}
-        recorded · archive and restore run as background jobs
+        <span className="num">{files.length}</span> {files.length === 1 ? "object" : "objects"} ·{" "}
+        <span className="num">{formatBytes(totalBytes)}</span> recorded · archive and restore run as
+        background jobs
       </p>
 
       <AlertDialog open={Boolean(removeTarget)} onOpenChange={(open) => !open && setRemoveTarget(null)}>
