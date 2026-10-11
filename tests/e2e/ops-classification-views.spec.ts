@@ -286,7 +286,7 @@ test.describe('Ops failure panel (slice O5)', () => {
   test('renders the classified failures the summary route returns', async ({ page, request }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
 
     // Drive the failure through the API with the browser's own session, then reload
     // so the operations view loads the freshly recorded classification.
@@ -312,16 +312,19 @@ test.describe('Ops failure panel (slice O5)', () => {
     expect(run.status()).toBe(200);
 
     await page.reload();
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
-    await page.getByRole('button', { name: 'Operations', exact: true }).click();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
+    await page
+      .locator('[data-testid="app-nav"]')
+      .getByRole('button', { name: 'Operations', exact: true })
+      .click();
 
-    await expect(page.getByRole('heading', { name: 'What is failing' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Failure analysis' })).toBeVisible();
     // The permanent INVALID_PAYLOAD failure is classified by code...
     await expect(page.getByText('INVALID_PAYLOAD', { exact: true }).first()).toBeVisible();
     // ...rolled up by job type and day...
-    await expect(page.getByRole('heading', { name: 'By job type and day' })).toBeVisible();
+    await expect(page.getByText('By job type and day', { exact: true })).toBeVisible();
     // ...and the job itself is listed as needing attention, with the repair action.
-    await expect(page.getByRole('heading', { name: 'Jobs needing attention' })).toBeVisible();
+    await expect(page.getByText('Jobs needing attention', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Retry' }).first()).toBeVisible();
   });
 });

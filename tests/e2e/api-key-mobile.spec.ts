@@ -8,27 +8,36 @@ test('keeps API key creation and the new secret on a phone screen', async ({ pag
   await page.getByRole('button', { name: 'Continue as Guest' }).click();
   await page.getByRole('button', { name: 'Access', exact: true }).click();
 
-  const code = page.locator('.confirm-code');
-  const button = page.getByRole('button', { name: 'Generate API Key' });
-  await expect(code).toBeVisible();
-  await expect(button).toBeVisible();
-  await expectOnScreen(code, viewport);
-  await expectOnScreen(button, viewport);
+  await page.getByRole('button', { name: 'Mint a key' }).first().click();
+  const dialog = page.locator('[data-testid="key-mint-form"]');
+  await expect(dialog).toBeVisible();
+
+  const nameInput = page.locator('#key-name');
+  const mintButton = page.getByRole('button', { name: 'Mint key' });
+  await expect(nameInput).toBeVisible();
+  await expect(mintButton).toBeVisible();
+  await expectOnScreen(nameInput, viewport);
+  await expectOnScreen(mintButton, viewport);
 
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
 
-  await page.fill('input[placeholder="e.g. Ingest Agent"]', 'Phone Agent');
+  await nameInput.fill('Phone Agent');
   await typeConfirmCode(page);
-  await button.click();
+  await mintButton.click();
 
-  const notice = page.locator('section.one-time-notice');
-  await expect(notice.getByText('New API Key Minted')).toBeVisible();
-  await expectOnScreen(notice, viewport);
-  await expectOnScreen(notice.getByRole('button', { name: 'Copy' }), viewport);
-  await expectOnScreen(notice.getByRole('button', { name: 'Done' }), viewport);
+  const secret = page.locator('[data-testid="one-time-secret"]');
+  await expect(secret).toBeVisible();
+  // The secret card sits below the mint dialog and may start under the fold on
+  // a phone — the design scrolls. Scrolled into view, the secret and its two
+  // actions must be fully on screen, with no horizontal clipping.
+  await secret.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(100);
+  await expectOnScreen(secret.getByText(/^octo_live_ws_/), viewport);
+  await expectOnScreen(secret.getByRole('button', { name: 'Copy to clipboard' }), viewport);
+  await expectOnScreen(secret.getByRole('button', { name: 'Dismiss' }), viewport);
 });
 
 async function expectOnScreen(

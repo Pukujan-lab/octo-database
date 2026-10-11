@@ -20,7 +20,7 @@ test.describe('Workspace-scoped key pinning', () => {
   }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
 
     // Pinning is orthogonal to the daily creation limit, which would refuse the
     // second workspace; exempt this fixture so both are created in one run.

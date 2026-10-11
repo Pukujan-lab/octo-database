@@ -15,8 +15,9 @@ import type { GalleryItem, PublicShare } from "@/lib/types";
  *  workspace data: anyone holding the link can open it. */
 export function PublicShareViewer({ themeControls }: { themeControls?: React.ReactNode }) {
   const params = useParams();
-  // The `*` splat catches tokens that themselves contain slashes.
-  const token = decodeURIComponent(params.splat ?? "");
+  // The `*` splat catches tokens that themselves contain slashes. React Router v6
+  // exposes a splat param under the "*" key, not "splat".
+  const token = decodeURIComponent(params["*"] ?? "");
   const [preview, setPreview] = useState<GalleryItem | null>(null);
 
   const query = useQuery({

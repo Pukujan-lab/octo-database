@@ -118,7 +118,12 @@ export function ApiKeysSection({
               codeError={codeError}
               refreshCode={refreshCode}
               me={me}
-              onMinted={setRawSecret}
+              // The confirmation code is single-use; refresh it so the next gated
+              // action on this panel has a live code instead of the consumed one.
+              onMinted={(secret) => {
+                setRawSecret(secret);
+                refreshCode();
+              }}
               needSecretSetup={() => setNeedSecret(true)}
               reload={reload}
             />
@@ -315,6 +320,8 @@ function AllowanceEditor({
       setOpen(false);
       setTyped("");
       setMfaCode("");
+      // The code was single-use; issue a fresh one for the next gated action.
+      gate.refreshCode();
       reload();
     } catch (error) {
       if (isConfirmSecretMissing(error)) onNeedSecret();

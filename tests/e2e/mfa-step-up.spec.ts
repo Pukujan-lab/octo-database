@@ -167,15 +167,15 @@ test.describe('MFA step-up for deletion', () => {
 async function enterGuest(page: Page): Promise<void> {
   await page.goto('/');
   await page.click('text=Continue as Guest');
-  await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+  await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
   await page.waitForLoadState('networkidle');
 }
 
 test.describe('MFA step-up through the dashboard', () => {
-  test('enroll from the Access page, then delete with a code in the modal', async ({ page }) => {
+  test('enroll from the Access page, then delete with a code', async ({ page }) => {
     await enterGuest(page);
 
-    // Arm the confirmation secret first: the delete modal will ask for it.
+    // Arm the confirmation secret first: the delete flow will ask for it.
     await page.evaluate(async (secret: string) => {
       const token = localStorage.getItem('octo_token');
       await fetch('/api/me/confirm-secret', {
@@ -187,36 +187,41 @@ test.describe('MFA step-up through the dashboard', () => {
     await page.reload();
     await page.waitForLoadState('networkidle');
 
-    // Enroll from the Access page: the modal shows the secret once.
+    // Enroll from the Access page: the panel shows the secret once, in place.
     await page.getByRole('button', { name: 'Access', exact: true }).click();
-    await page.getByRole('button', { name: 'Set up two-factor authentication' }).click();
-    await expect(page.getByRole('dialog').getByText('Set up two-factor authentication')).toBeVisible();
-    const secret = (await page.getByRole('dialog').locator('.secret-box code').innerText()).trim();
+    const mfaPanel = page
+      .locator('section.panel')
+      .filter({ has: page.getByRole('heading', { name: 'Two-factor authentication' }) });
+    await mfaPanel.getByRole('button', { name: 'Set up two-factor authentication' }).click();
+    const secret = (await mfaPanel.locator('p.num').first().innerText()).trim();
 
-    await page.getByRole('dialog').locator('input[name="code"]').fill(generateSync({ secret }));
-    await page.getByRole('dialog').getByRole('button', { name: 'Confirm and enable' }).click();
+    await mfaPanel.locator('#mfa-setup-code').fill(generateSync({ secret }));
+    await mfaPanel.getByRole('button', { name: 'Confirm and enable' }).click();
 
     // Recovery codes are issued exactly once; acknowledge and continue.
-    await expect(page.getByRole('dialog').getByText('Save your recovery codes')).toBeVisible();
-    await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
-    await expect(page.getByRole('heading', { name: 'Two-factor authentication' })).toBeVisible();
-    await expect(page.getByText(/Enabled\. \d+ recovery codes remaining\./)).toBeVisible();
+    await expect(mfaPanel.getByText('Recovery codes — shown once')).toBeVisible();
+    await mfaPanel.getByRole('button', { name: 'I have saved them' }).click();
+    await expect(mfaPanel.locator('#mfa-current')).toBeVisible();
 
-    // The delete modal now asks for an authenticator code, and the coded delete
+    // The delete flow now asks for an authenticator code, and the coded delete
     // succeeds through the real UI.
-    await page.getByRole('button', { name: 'Delete Workspace' }).click();
-    await expect(page.getByRole('dialog').getByRole('heading', { name: /^Delete / })).toBeVisible();
-    await page.getByRole('dialog').locator('input[name="slug"]').fill(await page.evaluate(async () => {
+    const settings = page
+      .locator('section.panel')
+      .filter({ has: page.getByRole('heading', { name: 'Settings' }) });
+    await settings.getByRole('button', { name: 'Delete workspace', exact: true }).click();
+    const target = await page.evaluate(async () => {
       const token = localStorage.getItem('octo_token');
       const list = await (
         await fetch('/api/workspaces', { headers: { Authorization: `Bearer ${token}` } })
       ).json();
-      return (list as { slug: string }[])[0]!.slug;
-    }));
-    await page.getByRole('dialog').locator('input[name="mfaCode"]').fill(generateSync({ secret }));
-    await typeConfirmCode(page, page.getByRole('dialog'));
-    await page.getByRole('dialog').getByRole('button', { name: 'Delete workspace' }).click();
+      return list[0] as { slug: string; name: string };
+    });
+    await settings.locator('#delete-slug').fill(target.slug);
+    await settings.locator('[data-testid="mfa-code"]').fill(generateSync({ secret }));
+    await typeConfirmCode(page, settings);
+    await settings.getByRole('button', { name: `Delete ${target.name}` }).click();
 
-    await expect(page.getByRole('dialog').getByRole('heading', { name: /^Delete / })).toHaveCount(0);
+    // The guest's only workspace is gone, so the session signs out.
+    await expect(page.getByRole('button', { name: 'Continue as Guest' })).toBeVisible({ timeout: 15000 });
   });
 });

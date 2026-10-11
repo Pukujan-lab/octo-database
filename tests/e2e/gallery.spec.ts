@@ -28,12 +28,12 @@ test.describe('Workspace Gallery', () => {
   test('grid loads thumbnail derivatives while the lightbox loads the original', async ({ page }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
 
     // Upload a real image through the file input.
     const photo = join(tmpdir(), 'gallery-e2e-photo.png');
     await makePng(photo, { r: 200, g: 60, b: 40 });
-    await page.setInputFiles('input[type="file"]', photo);
+    await page.locator('[data-testid="file-upload"]').setInputFiles(photo);
     await expect(page.getByText('gallery-e2e-photo.png').first()).toBeVisible();
     await page.getByRole('button', { name: 'Gallery', exact: true }).click();
 
@@ -83,7 +83,7 @@ test.describe('Workspace Gallery', () => {
   test('media routes reject unsigned and tampered requests', async ({ page }) => {
     await page.goto('/');
     await page.click('text=Continue as Guest');
-    await expect(page.locator('text=Workspace Control Dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="app-nav"]')).toBeVisible();
 
     // No credential at all -> unauthenticated.
     const unsigned = await page.request.get('/api/files/thumbnail?fileId=x&workspaceId=y');
