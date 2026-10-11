@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "npm --prefix frontend run dev",
-    "build": "npm --prefix frontend run build",
+    "dev:v2": "npm --prefix frontend-v2 run dev",
+    "build": "npm --prefix frontend run build && npm --prefix frontend-v2 run build",
     "server": "tsx src/server/index.ts",
     "production-smoke": "tsx scripts/production-smoke.ts",
     "capture-ops": "tsx scripts/capture-ops.ts",
