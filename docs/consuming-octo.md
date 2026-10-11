@@ -4,7 +4,8 @@
 (design-bakery and any future adopter).
 
 If a project is served by Octo, its durable data lives in Octo. You do not run the
-database; Octo provisions one for the project and hands you the connection string.
+database; Octo provisions one for the project, and you reach it either through Octo's
+SQL surface or — when you need a direct connection — with its own connection string.
 
 ---
 
@@ -81,8 +82,9 @@ There are two ways in, and you can use either or both:
 - **Through Octo (no connection string).** Run SQL with just your Octo API key —
   `POST /api/workspaces/<id>/query` or the MCP tool `query_workspace_database`. Nothing
   to store, nothing to leak, works from anywhere the Octo API is reachable.
-- **Directly (a Postgres client).** Provision once, store the connection string, connect
-  with `pg`, Prisma, Drizzle, `psql`, whatever the project already uses.
+- **Directly (a Postgres client).** The workspace already has a database; store its
+  connection string, then connect with `pg`, Prisma, Drizzle, `psql`, whatever the project
+  already uses.
 
 ### Through Octo — the SQL surface (Slice 21)
 
@@ -100,15 +102,21 @@ POST /api/workspaces/<id>/query      Authorization: Bearer <octo_live_...>
 - A multi-statement request (a whole migration) is allowed for a write caller with no
   parameters; a parameterized or read-only request is a single statement.
 
-### Directly — provision and connect
+### Directly — connect to the workspace's database
 
-1. **Provision once.** MCP tool `provision_database`, or
-   `POST /api/workspaces/<id>/database`. Requires an account-wide key with the
-   `write` scope (a workspace-scoped key cannot provision).
-   Returns `{ dbName, roleName, connectionString }`.
-2. **Store the connection string immediately.** It is shown **exactly once**. Put it in
-   the project's normal secret/env mechanism. If you lose it, use the SQL surface (which
-   needs no string), or the owner can rotate it.
+1. **The database already exists.** A workspace created through
+   `POST /api/workspaces` (or the MCP tool `create_workspace`) is auto-provisioned with
+   its own database at creation; the response reports `databaseProvisioned: true`. Only a
+   workspace that predates this — or one created while `OCTO_ADMIN_URL` was unset — needs
+   the explicit provision step: MCP tool `provision_database`, or
+   `POST /api/workspaces/<id>/database`. That route requires an account-wide key with the
+   `write` scope (a workspace-scoped key cannot provision) and returns
+   `{ dbName, roleName, connectionString }`.
+2. **Get the connection string, if you need it.** The explicit provision route returns it
+   once. A workspace that was auto-provisioned at creation is fully usable through the SQL
+   surface with no string at all; a direct string is only needed for a client that speaks
+   Postgres itself, and it is shown **exactly once**, so store it immediately in the
+   project's normal secret/env mechanism.
 3. **Connect with any Postgres client** — `pg`, PostgREST, Prisma, Drizzle, `psql`,
    whatever the project already uses. The role owns only its own database and reaches
    no Octo control-plane data.
@@ -125,8 +133,9 @@ above — it needs no connection string.
 
 ## Discover it
 
-- `GET /api/capabilities` → `workspaces.query`, `workspaces.provision_database`
-- MCP tools `query_workspace_database`, `provision_database`
+- `GET /api/capabilities` → `workspaces.create`, `workspaces.query`,
+  `workspaces.provision_database`
+- MCP tools `create_workspace`, `query_workspace_database`, `provision_database`
 - Octo README, "Slice 21"; `docs/self-hosting.md`
 
 ## Adopting an existing project that already runs its own datastore
@@ -162,8 +171,10 @@ with its own scoped role (pgvector-ready). Reach it either way:
 - **Through Octo (no connection string):** run SQL with your Octo API key —
   MCP `query_workspace_database` | HTTP `POST /api/workspaces/<id>/query`.
   Read scope is read-only; write scope mutates.
-- **Directly:** MCP `provision_database` | HTTP `POST /api/workspaces/<id>/database`;
-  the connection string is returned exactly once, so store it as a secret.
+- **Directly:** the workspace already has its own database; connect with its connection
+  string and store it as a secret. A workspace that still lacks one — created before
+  auto-provision, or while `OCTO_ADMIN_URL` was unset — gets it from
+  `provision_database` | `POST /api/workspaces/<id>/database`, returned once.
 
 Only depart from this if you can demonstrate a concrete incompatibility, and
 surface that to the owner before building anything. See Octo's

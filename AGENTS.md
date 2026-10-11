@@ -86,6 +86,20 @@ Paste this at session boot along with the CGM `system_block` (it comes from the 
 Dev root hygiene (ACS): the dev root (ACS_DEV_ROOT; default D:\development on Windows, ~/development elsewhere) holds exactly one main checkout per repo. Never create git worktrees, dependency or sibling clones, scratch folders, or caches there. Put them under the ACS cache instead: %LOCALAPPDATA%\acs\{deps,scratch,worktrees} on Windows, ~/.cache/acs/{deps,scratch,worktrees} on macOS/Linux (ACS_CACHE_DIR overrides). Check with scripts/dev_root_check.py.
 ```
 
+## Test-data hygiene
+
+Tests and manual probes create principals and workspaces on whatever instance they
+point at. On a shared or live instance, clean up what a run created instead of letting
+it accumulate.
+
+- A guest principal and the personal workspace it owns are test data. Remove them when
+  the test or probe is done.
+- Removal is ordered, because `octo.workspaces.created_by` is `ON DELETE RESTRICT`:
+  delete the guest's workspaces first, then the principal. A guest's sandbox is the
+  row with `auto_provisioned = true`.
+- Prefer pointing an automated suite at a disposable database. When a run must touch a
+  shared instance, prune what it created before finishing.
+
 ## Baseline secret hygiene
 
 Do not intentionally commit credential values, refresh/access tokens, private keys, or private `.env` contents. Use the normal secret/configuration mechanism supplied by the selected platform/provider. This baseline does **not** authorize agents to create additional secret-management systems, scanners, rotation ceremonies, isolation layers, or credential brokers without explicit scope.
