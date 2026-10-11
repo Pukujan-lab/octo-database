@@ -215,6 +215,93 @@ test.describe('OAuth 2.1 authorization for /mcp', () => {
     expect(replay.body.error).toBe('invalid_grant');
   });
 
+  test('consent can grant write, and the minted token can then write', async ({ request }) => {
+    const resource = ((await (await request.get('/.well-known/oauth-protected-resource')).json()) as {
+      resource: string;
+    }).resource;
+
+    const clientId = await registerClient(request);
+    const guest = await createGuest(request, 'write-grant');
+    const { verifier, challenge } = pkce();
+
+    // The consent page submits one scope field per checked box, so the POST here
+    // sends three repeated `scope` entries — the shape a real browser produces.
+    const form = new URLSearchParams();
+    form.set('client_id', clientId);
+    form.set('redirect_uri', REDIRECT_URI);
+    form.append('scope', 'read');
+    form.append('scope', 'files');
+    form.append('scope', 'write');
+    form.set('state', 'e2e-state');
+    form.set('code_challenge', challenge);
+    form.set('code_challenge_method', 'S256');
+    form.set('resource', resource);
+    form.set('workspace_id', guest.workspace.id);
+
+    const consent = await request.post('/oauth/authorize', {
+      headers: {
+        ...bearer(guest.sessionToken),
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      data: form.toString(),
+      maxRedirects: 0,
+    });
+    expect(consent.status()).toBe(302);
+    const code = new URL(consent.headers()['location']!).searchParams.get('code');
+    expect(code).toBeTruthy();
+
+    const { status, body } = await exchange(request, clientId, code!, verifier);
+    expect(status).toBe(200);
+    const accessToken = body.access_token!;
+
+    // The granted write scope reaches the capability list...
+    const caps = await request.get(`/api/capabilities?workspaceId=${guest.workspace.id}`, {
+      headers: bearer(accessToken),
+    });
+    expect(caps.status()).toBe(200);
+    const actions = ((await caps.json()) as { capabilities: { action: string }[] }).capabilities.map(
+      (c) => c.action
+    );
+    expect(actions).toContain('files.upload');
+
+    // ...and the write route is no longer refused for lack of scope. It still
+    // fails on the missing bytes, which proves the scope gate let it through.
+    const write = await request.post('/api/files/upload', {
+      headers: bearer(accessToken),
+      data: { workspaceId: guest.workspace.id, name: 'granted.txt', mimeType: 'text/plain' },
+    });
+    expect(write.status()).not.toBe(403);
+  });
+
+  test('the consent page refuses a grant with no permission selected', async ({ request }) => {
+    const resource = ((await (await request.get('/.well-known/oauth-protected-resource')).json()) as {
+      resource: string;
+    }).resource;
+    const clientId = await registerClient(request);
+    const guest = await createGuest(request, 'no-scope');
+    const { challenge } = pkce();
+
+    const form = new URLSearchParams();
+    form.set('client_id', clientId);
+    form.set('redirect_uri', REDIRECT_URI);
+    form.set('state', 'e2e-state');
+    form.set('code_challenge', challenge);
+    form.set('code_challenge_method', 'S256');
+    form.set('resource', resource);
+    form.set('workspace_id', guest.workspace.id);
+
+    const response = await request.post('/oauth/authorize', {
+      headers: {
+        ...bearer(guest.sessionToken),
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      data: form.toString(),
+      maxRedirects: 0,
+    });
+    expect(response.status()).toBe(400);
+    expect(await response.text()).toContain('No permissions selected');
+  });
+
   test('a signed-in browser is resumed at the consent page after the login bounce', async ({ page, request }) => {
     const resource = ((await (await request.get('/.well-known/oauth-protected-resource')).json()) as {
       resource: string;
@@ -234,7 +321,9 @@ test.describe('OAuth 2.1 authorization for /mcp', () => {
     await page.addInitScript((token) => localStorage.setItem('octo_token', token), guest.sessionToken);
     await page.goto(authorizeUrl);
     await expect(page.getByText('Connect to Octo')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Allow read access' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Allow access' })).toBeVisible();
+    // One checkbox per grantable scope, so the human can widen or narrow the grant.
+    await expect(page.getByRole('checkbox')).toHaveCount(4);
   });
 
   test('the login bounce refuses to redirect off-origin', async ({ page, request }) => {

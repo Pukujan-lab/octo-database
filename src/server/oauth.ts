@@ -46,14 +46,23 @@ const DANCE_COOKIE_TTL_MS = 10 * 60 * 1000;
 const DANCE_COOKIE = 'octo_oauth_dance';
 
 /**
- * The scopes an OAuth client may hold: Octo's two non-mutating scopes. 'read'
- * covers workspace/activity/metadata reads and 'files' covers listing and
- * downloading files; neither can write or delete. Writes stay out of reach until
- * the owner deliberately widens this, so an OAuth connector is read-only by
- * construction rather than by the client's good behaviour.
+ * The scopes an OAuth client may hold. The client asks for a set on the
+ * authorization request; the consent page lets the human widen or narrow it
+ * before a token is minted, and the granted set is what the access token carries.
+ * The consent page pre-selects exactly what the client asked for, so a read-only
+ * client still yields a read-only token unless the human deliberately opts into
+ * write or delete.
  */
-const OAUTH_ALLOWED_SCOPES = ['read', 'files'];
+const OAUTH_ALLOWED_SCOPES = ['read', 'write', 'delete', 'files'];
 const DEFAULT_OAUTH_SCOPE = 'read files';
+
+/** Human labels for the consent checkboxes, keyed by scope. */
+const SCOPE_LABELS: Record<string, string> = {
+  read: 'Read workspace data, activity, and metadata',
+  files: 'List and download files',
+  write: 'Create and change workspace data and files',
+  delete: 'Delete workspace data and files',
+};
 
 function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex');
@@ -68,7 +77,7 @@ function constantTimeEquals(a: string, b: string): boolean {
 function baseHtml(res: ServerResponse, status: number, title: string, body: string): void {
   res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(
-    `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font-family:system-ui,sans-serif;background:#0d0f12;color:#e8e6e1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}main{background:#16191f;border:1px solid #2a2f38;border-radius:12px;padding:2rem;max-width:26rem;width:100%}h1{font-size:1.1rem;margin:0 0 1rem}label{display:block;font-size:.85rem;margin:.9rem 0 .3rem}select,input{width:100%;box-sizing:border-box;background:#0d0f12;color:#e8e6e1;border:1px solid #2a2f38;border-radius:8px;padding:.5rem}button{margin-top:1.2rem;width:100%;background:#4f7cff;color:#fff;border:0;border-radius:8px;padding:.6rem;font-size:.95rem;cursor:pointer}.muted{color:#9aa1ab;font-size:.8rem}</style></head><body><main>${body}</main></body></html>`
+    `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font-family:system-ui,sans-serif;background:#0d0f12;color:#e8e6e1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}main{background:#16191f;border:1px solid #2a2f38;border-radius:12px;padding:2rem;max-width:26rem;width:100%}h1{font-size:1.1rem;margin:0 0 1rem}label{display:block;font-size:.85rem;margin:.9rem 0 .3rem}select,input{width:100%;box-sizing:border-box;background:#0d0f12;color:#e8e6e1;border:1px solid #2a2f38;border-radius:8px;padding:.5rem}button{margin-top:1.2rem;width:100%;background:#4f7cff;color:#fff;border:0;border-radius:8px;padding:.6rem;font-size:.95rem;cursor:pointer}.muted{color:#9aa1ab;font-size:.8rem}.scopes{border:0;padding:0;margin:.9rem 0}.scopes legend{font-size:.85rem;padding:0}.scopes label{display:flex;gap:.5rem;align-items:flex-start;margin:.5rem 0;font-size:.85rem;font-weight:400}.scopes input{width:auto;margin-top:.15rem}</style></head><body><main>${body}</main></body></html>`
   );
 }
 
@@ -318,8 +327,9 @@ async function validateAuthorizeRequest(
   if (!params.resource) {
     return { errorRedirect: ['invalid_target', params.state ?? ''] };
   }
-  const scopes = (params.scope ?? DEFAULT_OAUTH_SCOPE).split(/[\s+]/).filter(Boolean);
-  if (scopes.some((s) => !OAUTH_ALLOWED_SCOPES.includes(s))) {
+  const requested = params.scope && params.scope.trim() ? params.scope : DEFAULT_OAUTH_SCOPE;
+  const scopes = requested.split(/[\s+]/).filter(Boolean);
+  if (scopes.length === 0 || scopes.some((s) => !OAUTH_ALLOWED_SCOPES.includes(s))) {
     return { errorRedirect: ['invalid_scope', params.state ?? ''] };
   }
   return { client, redirectUri, scope: scopes.join(' '), resource: params.resource };
@@ -336,20 +346,28 @@ function consentPage(
   const options = workspaces
     .map((w) => `<option value="${esc(w.id)}">${esc(w.name)}</option>`)
     .join('');
+  const requested = new Set(scope.split(' ').filter(Boolean));
+  const scopeBoxes = OAUTH_ALLOWED_SCOPES.map((s) => {
+    const checked = requested.has(s) ? ' checked' : '';
+    return (
+      `<label><input type="checkbox" name="scope" value="${esc(s)}"${checked} />` +
+      `<span><strong>${esc(s)}</strong> — ${esc(SCOPE_LABELS[s] ?? '')}</span></label>`
+    );
+  }).join('');
   return (
     `<h1>Connect to Octo</h1>` +
-    `<p class="muted"><strong>${esc(client.client_name ?? params.clientId!)}</strong> wants read access to one Octo workspace through the MCP API.</p>` +
+    `<p class="muted"><strong>${esc(client.client_name ?? params.clientId!)}</strong> wants to connect to one Octo workspace through the MCP API. Choose what it may do.</p>` +
     `<form method="post" action="/oauth/authorize">` +
     hidden('client_id', params.clientId!) +
     hidden('redirect_uri', params.redirectUri ?? '') +
-    hidden('scope', scope) +
     hidden('state', params.state ?? '') +
     hidden('code_challenge', params.codeChallenge!) +
     hidden('code_challenge_method', 'S256') +
     hidden('resource', params.resource!) +
     `<label>Workspace<select name="workspace_id" required>${options}</select></label>` +
-    `<button type="submit">Allow read access</button>` +
-    `</form><p class="muted">Read-only: the connection can look, not change. Revoke it any time by removing its access.</p>`
+    `<fieldset class="scopes"><legend>Permissions</legend>${scopeBoxes}</fieldset>` +
+    `<button type="submit">Allow access</button>` +
+    `</form><p class="muted">The granted permissions are recorded on the connection. Revoke them any time by removing its access.</p>`
   );
 }
 
@@ -398,11 +416,16 @@ async function handleAuthorizeGet(req: IncomingMessage, res: ServerResponse, url
 async function handleAuthorizePost(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   const origin = getPublicOrigin(req, url);
   const form = await readForm(req);
+  const grantedScopes = form.getAll('scope').map((s) => s.trim()).filter(Boolean);
+  if (grantedScopes.length === 0) {
+    baseHtml(res, 400, 'No permissions', '<h1>No permissions selected</h1><p class="muted">Choose at least one permission to grant this connection.</p>');
+    return;
+  }
   const params: AuthorizeParams = {
     responseType: 'code',
     clientId: form.get('client_id'),
     redirectUri: form.get('redirect_uri'),
-    scope: form.get('scope'),
+    scope: grantedScopes.join(' '),
     state: form.get('state'),
     codeChallenge: form.get('code_challenge'),
     codeChallengeMethod: form.get('code_challenge_method'),
