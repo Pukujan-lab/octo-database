@@ -35,7 +35,7 @@ export const OCTO_CAPABILITIES: CapabilityDescriptor[] = [
     path: '/api/workspaces',
     requiredScope: 'write',
     description:
-      'Create a workspace (workspace = database) and auto-provision its key. Not available to workspace-scoped keys.',
+      'Create a workspace and auto-provision its own PostgreSQL database and its first key. Not available to workspace-scoped keys.',
   },
   {
     action: 'workspaces.provision_database',
@@ -43,7 +43,7 @@ export const OCTO_CAPABILITIES: CapabilityDescriptor[] = [
     path: '/api/workspaces/<id>/database',
     requiredScope: 'write',
     description:
-      'Provision a real PostgreSQL database owned by a workspace and return its connection string exactly once. Not available to workspace-scoped keys.',
+      'Provision a real PostgreSQL database owned by a workspace and return its connection string exactly once. A workspace created through POST /api/workspaces already has one; this route is for a workspace that does not, and fails with DATABASE_EXISTS otherwise. Not available to workspace-scoped keys.',
   },
   {
     action: 'workspaces.query',

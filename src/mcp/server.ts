@@ -51,7 +51,7 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
 
   server.tool(
     'create_workspace',
-    'Create a workspace and mint its first API key. Returns the workspace plus the new key; the raw secret is shown exactly once. Requires an account-wide token — a workspace-scoped key cannot create workspaces.',
+    'Create a workspace, auto-provision its own PostgreSQL database, and mint its first API key. Returns the workspace plus the new key; the raw secret is shown exactly once, and the response reports whether the database was provisioned. Requires an account-wide token — a workspace-scoped key cannot create workspaces.',
     {
       name: z.string().describe('Human-readable workspace name'),
       slug: z.string().optional().describe('URL slug (defaults to a slugified name)'),
@@ -90,7 +90,7 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
 
   server.tool(
     'provision_database',
-    'Provision a real PostgreSQL database owned by a workspace and return its connection string. The string is shown exactly once; connect to it with an ordinary Postgres client to create and use your own tables. Requires an account-wide token, and a workspace that does not already have a database.',
+    'Provision a real PostgreSQL database owned by a workspace and return its connection string. The string is shown exactly once; connect to it with an ordinary Postgres client to create and use your own tables. A workspace created through create_workspace already has a database, so this is for one that does not (it fails with DATABASE_EXISTS otherwise). Requires an account-wide token.',
     { workspaceId: z.string().describe('The workspace to provision a database for') },
     async ({ workspaceId }) => {
       try {

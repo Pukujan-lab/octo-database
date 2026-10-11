@@ -64,6 +64,19 @@ function runSql(
   });
 }
 
+async function createWorkspace(
+  request: APIRequestContext,
+  sessionToken: string,
+  name: string
+): Promise<{ workspace: { id: string }; databaseProvisioned: boolean }> {
+  const response = await request.post('/api/workspaces', {
+    headers: bearer(sessionToken),
+    data: { name, confirmSecret: CONFIRM_SECRET },
+  });
+  expect(response.status()).toBe(201);
+  return (await response.json()) as never;
+}
+
 test.describe('Workspace SQL surface', () => {
   test('unauthenticated callers are refused', async ({ request }) => {
     const response = await request.post(`/api/workspaces/${randomUUID()}/query`, {
@@ -108,6 +121,8 @@ test.describe('Workspace SQL surface', () => {
     }
   });
 
+  // A guest's personal sandbox is not auto-provisioned (only an explicit
+  // workspace creation is), so it still has no database and fails closed.
   test('a workspace without a provisioned database fails closed with 404', async ({ request }) => {
     const owner = await createGuest(request);
     const key = await mintKey(request, owner.sessionToken, owner.workspace.id, ['read']);
@@ -133,6 +148,28 @@ test.describe('Workspace SQL surface', () => {
     // The token carries no write scope, so it cannot discover the provisioning
     // action -- and running SQL with it stays read-only server-side.
     expect(actions.has('workspaces.provision_database')).toBe(false);
+  });
+
+  test('a workspace created through the API arrives with its database', async ({ request }) => {
+    const owner = await createGuest(request);
+    const created = await createWorkspace(request, owner.sessionToken, `Auto Provision ${randomUUID()}`);
+
+    // The flag is the truth about whether this call provisioned: a workspace
+    // created here needs no second, separately authorized provisioning call.
+    expect(typeof created.databaseProvisioned).toBe('boolean');
+
+    const key = await mintKey(request, owner.sessionToken, created.workspace.id, ['read']);
+    const probe = await runSql(request, key.rawSecret, created.workspace.id, 'SELECT 1 AS one');
+
+    if (created.databaseProvisioned) {
+      expect(probe.status()).toBe(200);
+      expect(((await probe.json()).rows[0] as { one: number }).one).toBe(1);
+    } else {
+      // Provisioning is unconfigured here (no OCTO_ADMIN_URL), so the workspace
+      // fails closed exactly like a guest's -- the flag said so in advance.
+      expect(probe.status()).toBe(404);
+      expect((await probe.json()).error).toMatch(/DATABASE_NOT_PROVISIONED/);
+    }
   });
 
   test('provision then query: an API key alone runs and reads back SQL', async ({ request }) => {
