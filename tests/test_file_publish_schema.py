@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 MIGRATION_PATH = (
-    Path(__file__).parent.parent / "supabase" / "migrations" / "20261006160000_file_publish.sql"
+    Path(__file__).parent.parent / "db" / "migrations" / "20261006160000_file_publish.sql"
 )
 
 
