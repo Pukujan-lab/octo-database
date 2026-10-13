@@ -218,6 +218,24 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
   );
 
   server.tool(
+    'ingest_document',
+    'Index a text document into a workspace so query_workspace can retrieve it. Chunks and embeds the text server-side; re-ingesting identical content is a no-op. Uploads via upload_file are NOT indexed automatically — use this tool to make text searchable. Requires the write scope and an operator or higher role.',
+    {
+      workspaceId: z.string().describe('The workspace to ingest into'),
+      title: z.string().describe('Document title (unique per workspace)'),
+      text: z.string().describe('The document text to index'),
+      mimeType: z.string().optional().describe('MIME type (defaults to text/plain)'),
+    },
+    async ({ workspaceId, title, text, mimeType }) => {
+      try {
+        return asText(await api.ingestDocument({ workspaceId, title, text, mimeType }));
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
     'query_graph',
     'Run a read-only Cypher query against a workspace\'s graph. The graph is a rebuildable projection of the workspace\'s canonical data, and the query reaches only this workspace\'s graph — the graph name is derived server-side, so no argument can name another. Read-only; requires the read scope.',
     {
