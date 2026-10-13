@@ -70,6 +70,14 @@ Only slices that expose RAG/GraphRAG retrieval depend on this packet; file/API/U
 
 **EVAL:** Project/query, replay, update/supersede, delete graph, rebuild, and compare logical results; show stale state; enforce workspace binding; retain evidence IDs. Reuse #12's stated checks and smoke one graph-enabled workspace. Level 2.
 
+## Slice 8 addendum — RAG document lifecycle
+
+**PDD:** A workspace that ingests documents can also manage them: list what is indexed, read one document and its versions, rename its title, and delete it with everything derived from it. Ingest and semantic query already worked; without the rest, an agent that indexed the wrong thing had no way to find it again or remove it.
+
+**SDD:** Adds the four routes (`GET /api/rag/documents`, `GET /api/rag/documents/<id>`, `POST /api/rag/documents/<id>/rename`, `DELETE /api/rag/documents/<id>`) over the existing `octo.documents`/`document_versions`/`chunks`/`embeddings` model. Rename is metadata-only — versions are content-hashed and immutable, so a text change stays a re-ingest. One migration adds the missing `documents_update_operator` and `documents_delete_owner_admin` row-security policies; deleting a document row already cascades to every derived row, so no extra cleanup SQL is needed. Scope and role checks mirror the file routes: read for list/get, write plus operator for rename, delete plus owner/admin for delete.
+
+**EVAL:** `tests/e2e/rag-document-lifecycle.spec.ts` drives the full job over HTTP against a real database (fixtures seeded directly, since CI has no embedding provider). MR-1: deleting one document leaves a sibling's versions, chunks, and embeddings untouched. MR-2: a key missing the scope, missing the role, or pinned to another workspace is refused, and the document survives. Malformed ids follow the existing `identifier-validation` 400 contract. MCP tool coverage (`list_documents`, `get_document`, `rename_document`, `delete_document`) is asserted in `tests/unit/mcp-server.test.ts`.
+
 ## Optional integrated demonstration
 
 After independently shippable slices are complete, the owner may request a cross-slice demonstration on the deployed test candidate: login → workspace → discovery → file operations → clients → recovery → enabled analytics/proposal/projection jobs. It is a summary, not an additional acceptance gate for any completed slice. Production changes continue through a pull request into `production` with auto-merge armed.

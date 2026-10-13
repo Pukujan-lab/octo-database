@@ -70,6 +70,14 @@ describe('Capability discovery', () => {
     expect(byAction.get('keys.revoke')?.requiredScope).toBe('delete');
     expect(minimumRoleForCapability('files.publish')).toBe('operator');
     expect(minimumRoleForCapability('files.unpublish')).toBe('operator');
+    expect(byAction.get('rag.list')?.requiredScope).toBe('read');
+    expect(byAction.get('rag.get')?.requiredScope).toBe('read');
+    expect(byAction.get('rag.ingest')?.requiredScope).toBe('write');
+    expect(byAction.get('rag.rename')?.requiredScope).toBe('write');
+    expect(byAction.get('rag.delete')?.requiredScope).toBe('delete');
+    expect(byAction.get('rag.delete')?.method).toBe('DELETE');
+    expect(minimumRoleForCapability('rag.rename')).toBe('operator');
+    expect(minimumRoleForCapability('rag.delete')).toBe('admin');
 
     const program = capabilitiesForScopes(['read', 'write', 'files']);
     expect(program.some((c) => c.action === 'files.publish')).toBe(true);
