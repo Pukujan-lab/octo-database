@@ -2,145 +2,33 @@ name: Issue Triage
 
 on:
   issues:
-    types: [opened, edited]
+    types: [opened, edited, labeled, unlabeled]
 
 permissions:
+  contents: read
   issues: write
 
 jobs:
   triage:
-    name: Triage Observational Issue
+    name: Validate ontology and classify issue log
+    concurrency:
+      group: oio-issue-triage-${{ github.event.issue.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
-      - name: Triage plane, priority, and proposal semantics
-        uses: actions/github-script@v7
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
-          script: |
-            const issue = context.payload.issue;
-            const body = issue.body || '';
+          python-version: "3.12"
 
-            // Check if this is an observational issue
-            const isObservational =
-              issue.labels.some(l => l.name === 'observational-issue') ||
-              body.includes('Contributor Plane') ||
-              body.includes('Observational Plane');
+      - name: Install pinned OIO validator dependency
+        run: |
+          requirements="requirements.txt"
+          if [ -f .oio/requirements.txt ]; then requirements=".oio/requirements.txt"; fi
+          python -m pip install --requirement "$requirements"
 
-            if (!isObservational) {
-              console.log('Not an observational issue. Skipping triage.');
-              return;
-            }
-
-            const labelsToAdd = new Set();
-            labelsToAdd.add('observational-issue');
-            labelsToAdd.add('proposal');
-
-            // 1. Detect Plane from plane section
-            let plane = null;
-            const planeSectionMatch = body.match(/(?:###\s*(?:Contributor|Observational)\s*Plane|Plane:?)[^\n]*\n+([^\n#]+)/i);
-            const planeTarget = planeSectionMatch ? planeSectionMatch[1] : '';
-
-            if (
-              planeTarget.includes('Plane 1') ||
-              planeTarget.includes('Lead Owner') ||
-              (!planeSectionMatch && (body.includes('plane:lead-owner') || body.includes('Plane 1:')))
-            ) {
-              plane = 1;
-              labelsToAdd.add('plane:lead-owner');
-            } else if (
-              planeTarget.includes('Plane 2') ||
-              planeTarget.includes('Collaborator') ||
-              (!planeSectionMatch && (body.includes('plane:collaborator') || body.includes('Plane 2:')))
-            ) {
-              plane = 2;
-              labelsToAdd.add('plane:collaborator');
-            } else if (
-              planeTarget.includes('Plane 3') ||
-              planeTarget.includes('Community') ||
-              (!planeSectionMatch && (body.includes('plane:community') || body.includes('Plane 3:')))
-            ) {
-              plane = 3;
-              labelsToAdd.add('plane:community');
-            } else {
-              // Fallback heuristic if section header not found
-              if (body.match(/\b(?:Plane\s*1|Lead Owner)\b/i)) {
-                plane = 1;
-                labelsToAdd.add('plane:lead-owner');
-              } else if (body.match(/\b(?:Plane\s*2|Collaborator)\b/i)) {
-                plane = 2;
-                labelsToAdd.add('plane:collaborator');
-              } else if (body.match(/\b(?:Plane\s*3|Community)\b/i)) {
-                plane = 3;
-                labelsToAdd.add('plane:community');
-              }
-            }
-
-            // 2. Parse Priority Rating (1-100)
-            const prioritySectionMatch = body.match(/(?:###\s*Priority\s*Rating[^\n]*|Priority Rating[^\n:]*:?)\s*\n*([^\n#]+)/i);
-            let pVal = null;
-
-            if (prioritySectionMatch) {
-              const numMatch = prioritySectionMatch[1].match(/\b([1-9][0-9]?|100)\b/);
-              if (numMatch) {
-                pVal = parseInt(numMatch[1], 10);
-              }
-            }
-
-            if (pVal === null) {
-              const explicitMatch = body.match(/\b(?:priority:p|Priority\s*P|P)([1-9][0-9]?|100)\b/i);
-              if (explicitMatch) {
-                pVal = parseInt(explicitMatch[1], 10);
-              }
-            }
-
-            if (pVal !== null) {
-              // Clamp or validate based on plane rubric
-              if (plane === 1) {
-                pVal = Math.max(1, Math.min(20, pVal));
-              } else if (plane === 2) {
-                pVal = Math.max(20, Math.min(40, pVal));
-              } else if (plane === 3) {
-                pVal = Math.max(40, Math.min(100, pVal));
-              } else {
-                pVal = Math.max(1, Math.min(100, pVal));
-              }
-              labelsToAdd.add(`priority:p${pVal}`);
-            }
-
-            // 3. Apply labels
-            const targetLabels = Array.from(labelsToAdd);
-            console.log(`Adding labels to issue #${issue.number}:`, targetLabels);
-
-            // Ensure labels exist before adding
-            for (const name of targetLabels) {
-              try {
-                await github.rest.issues.getLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name,
-                });
-              } catch (e) {
-                // Label does not exist, create it
-                const color = name.startsWith('plane:lead-owner') ? 'd93f0b' :
-                              name.startsWith('plane:collaborator') ? '0075ca' :
-                              name.startsWith('plane:community') ? '0e8a16' :
-                              name.startsWith('priority:p') ? 'b60205' : '6f42c1';
-                try {
-                  await github.rest.issues.createLabel({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    name,
-                    color,
-                    description: `Automated label for ${name}`,
-                  });
-                } catch (createErr) {
-                  console.log(`Note: could not create label ${name}:`, createErr.message);
-                }
-              }
-            }
-
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issue.number,
-              labels: targetLabels,
-            });
+      - name: Validate and label issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python .github/scripts/oio_triage.py

@@ -1,0 +1,116 @@
+{
+  "schema_version": "oio.project-issue-log-ontology.v1",
+  "project_id": "Pukujan/octo-database",
+  "namespace": "pukujan-octo-database",
+  "extends": {
+    "ontology_id": "oio:issue-log",
+    "version": "1.0.0"
+  },
+  "version": "1.0.0",
+  "concepts": [],
+  "priorities": [
+    {
+      "path": "1",
+      "concept_id": "pukujan-octo-database:priority-1",
+      "label": "Product-blocking defect on the live instance",
+      "definition": "A global invariant or an accepted slice success condition is violated on the running Octo instance: risk to durable state (the epistemic ledger, a workspace database, files/R2, or backups), an access-control/tenancy/credential-boundary failure, or a broken deploy/CI/production-promotion path. Nothing in this band should wait. See PROJECT.md 'Global invariants'."
+    },
+    {
+      "path": "1.1",
+      "concept_id": "pukujan-octo-database:priority-1-1",
+      "label": "Durable-state / data-integrity risk",
+      "definition": "Child of 1. Loss or corruption risk to the ledger, a workspace DB, R2-stored file bytes, or the backup/restore path (e.g. the single-point-of-failure backup gap in #202). Recoverability is difficult-or-irreversible or unknown."
+    },
+    {
+      "path": "1.2",
+      "concept_id": "pukujan-octo-database:priority-1-2",
+      "label": "Access-control / tenancy / credential-boundary failure",
+      "definition": "Child of 1. A workspace, principal, key scope, or the master-credential boundary (SDK/MCP/browsers must never receive master infra credentials) is breached or leaks across tenants."
+    },
+    {
+      "path": "1.3",
+      "concept_id": "pukujan-octo-database:priority-1-3",
+      "label": "Deploy / CI / production-promotion path broken",
+      "definition": "Child of 1. Required `gates` cannot pass, auto-merge is un-armable, the Docker image fails at deploy despite green gates, or the main->production promotion path is broken."
+    },
+    {
+      "path": "2",
+      "concept_id": "pukujan-octo-database:priority-2",
+      "label": "Productized capability degraded",
+      "definition": "A user job in the productization chain (system requirement -> user job -> durable backend -> API contract -> usable frontend -> automated verification) is broken or unverified, but durable state is not at risk. Blocks an accepted slice without risking data."
+    },
+    {
+      "path": "2.1",
+      "concept_id": "pukujan-octo-database:priority-2-1",
+      "label": "Backend / API contract gap",
+      "definition": "Child of 2. A server route, scope rule, or MCP tool contract is wrong, missing, or unverified against its slice's API contract."
+    },
+    {
+      "path": "2.2",
+      "concept_id": "pukujan-octo-database:priority-2-2",
+      "label": "Dashboard / frontend flow gap",
+      "definition": "Child of 2. One of the owner's required product views (control dashboard #3, workspace gallery #5, operations #8) is broken or not user-flow-verified. Reuse the owner's chosen frontend approach; do not prescribe a framework."
+    },
+    {
+      "path": "2.3",
+      "concept_id": "pukujan-octo-database:priority-2-3",
+      "label": "MCP / SDK surface gap",
+      "definition": "Child of 2. The MCP adapter or SDK fails to expose a capability or duplicates server policy it must not own."
+    },
+    {
+      "path": "3",
+      "concept_id": "pukujan-octo-database:priority-3",
+      "label": "Bounded correctness or reliability bug",
+      "definition": "A real defect with a usable workaround or recovery, not blocking a named product outcome. Slower than 1-2 but a demonstrated fault, not speculation."
+    },
+    {
+      "path": "4",
+      "concept_id": "pukujan-octo-database:priority-4",
+      "label": "Adopter / integration friction",
+      "definition": "Rough edges in how another project consumes Octo (docs/consuming-octo.md, key provisioning, workspace-scoped vs account-wide keys, SQL surface ergonomics). The platform works; the path through it is bumpy."
+    },
+    {
+      "path": "5",
+      "concept_id": "pukujan-octo-database:priority-5",
+      "label": "Enhancement aligned to product goals",
+      "definition": "A capability or improvement that advances Octo's stated goals; nothing is broken. Ranked by how much it moves a named outcome and its cost of delay."
+    },
+    {
+      "path": "6",
+      "concept_id": "pukujan-octo-database:priority-6",
+      "label": "Observational / research note",
+      "definition": "A finding, pattern, or decision worth recording (for docs/research and the epistemic ledger) with no defect asserted. Matches non-binding proposals like the artifact-placement observation."
+    },
+    {
+      "path": "7",
+      "concept_id": "pukujan-octo-database:priority-7",
+      "label": "Maintenance, docs, and cleanup",
+      "definition": "Documentation, dead-weight removal, pin/housekeeping, and test-data hygiene chores (e.g. the now-empty files tarball in backups)."
+    },
+    {
+      "path": "8",
+      "concept_id": "pukujan-octo-database:priority-8",
+      "label": "Speculative or low-evidence edge case",
+      "definition": "Imaginable but unobserved, bounded, low-impact cases. Kept visible; by rule these do not block a declared product outcome on their own."
+    },
+    {
+      "path": "9",
+      "concept_id": "pukujan-octo-database:priority-9",
+      "label": "Out of scope for Octo",
+      "definition": "Belongs to another repo (ACS/PCM/CGM/OIO), an adopter's own project, or an external provider. Filed here only for cross-reference; route via OIO to the owning repo."
+    },
+    {
+      "path": "10",
+      "concept_id": "pukujan-octo-database:priority-10",
+      "label": "Deferred or parked by owner",
+      "definition": "Accepted as real but deliberately postponed by the owner; not deleted, so a future slice can reopen it with its original evidence."
+    }
+  ],
+  "account_authority": [
+    {
+      "github_user_id": "137629468",
+      "login": "Pukujan",
+      "authority": "owner"
+    }
+  ]
+}
