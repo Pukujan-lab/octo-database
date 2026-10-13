@@ -18,6 +18,10 @@
 
 set -euo pipefail
 
+# A non-login ssh shell's PATH omits /usr/local/bin, where Docker Desktop installs
+# its CLI; launchd supplies its own PATH for the timer but a manual run does not.
+export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/../gravebuster/docker-compose.yml"
 BACKUP_DIR="${OCTO_BACKUP_DIR:-$HOME/octo-backups}"

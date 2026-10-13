@@ -176,6 +176,32 @@ export class OctoApi {
     });
   }
 
+  listDocuments(workspaceId: string): Promise<unknown> {
+    return this.request('GET', `/api/rag/documents?workspaceId=${encodeURIComponent(workspaceId)}`);
+  }
+
+  getDocument(input: { workspaceId: string; documentId: string }): Promise<unknown> {
+    return this.request(
+      'GET',
+      `/api/rag/documents/${encodeURIComponent(input.documentId)}?workspaceId=${encodeURIComponent(input.workspaceId)}`
+    );
+  }
+
+  renameDocument(input: { workspaceId: string; documentId: string; title: string }): Promise<unknown> {
+    return this.request(
+      'POST',
+      `/api/rag/documents/${encodeURIComponent(input.documentId)}/rename`,
+      { workspaceId: input.workspaceId, title: input.title }
+    );
+  }
+
+  deleteDocument(input: { workspaceId: string; documentId: string }): Promise<unknown> {
+    return this.request(
+      'DELETE',
+      `/api/rag/documents/${encodeURIComponent(input.documentId)}?workspaceId=${encodeURIComponent(input.workspaceId)}`
+    );
+  }
+
   graphQuery(input: {
     workspaceId: string;
     query: string;

@@ -42,11 +42,14 @@ describe('Octo MCP adapter', () => {
 
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       'create_workspace',
+      'delete_document',
       'delete_file',
       'download_file',
+      'get_document',
       'get_ops_summary',
       'graph_health',
       'ingest_document',
+      'list_documents',
       'list_files',
       'list_ops_events',
       'list_workspaces',
@@ -59,6 +62,7 @@ describe('Octo MCP adapter', () => {
       'query_workspace',
       'query_workspace_database',
       'record_epistemic',
+      'rename_document',
       'retry_job',
       'upload_file',
       'whoami',
@@ -289,5 +293,56 @@ describe('Octo MCP adapter', () => {
 
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('400');
+  });
+
+  it('lists a workspace\'s documents through the documents route', async () => {
+    const calls: string[] = [];
+    const client = await connect(apiWith(200, '[{"documentId":"d1","title":"Runbook"}]', calls));
+
+    const result = await client.callTool({ name: 'list_documents', arguments: { workspaceId: 'w1' } });
+
+    expect(calls).toEqual(['http://octo.test/api/rag/documents?workspaceId=w1']);
+    expect(result.isError).toBeFalsy();
+    expect(textOf(result)).toContain('Runbook');
+  });
+
+  it('renames a document through the rename route', async () => {
+    const calls: string[] = [];
+    const client = await connect(apiWith(200, '{"documentId":"d1","title":"New"}', calls));
+
+    const result = await client.callTool({
+      name: 'rename_document',
+      arguments: { workspaceId: 'w1', documentId: 'd1', title: 'New' },
+    });
+
+    expect(calls).toEqual(['http://octo.test/api/rag/documents/d1/rename']);
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('deletes a document through the documents route', async () => {
+    const calls: string[] = [];
+    const client = await connect(apiWith(200, '{"documentId":"d1","deleted":true}', calls));
+
+    const result = await client.callTool({
+      name: 'delete_document',
+      arguments: { workspaceId: 'w1', documentId: 'd1' },
+    });
+
+    expect(calls).toEqual(['http://octo.test/api/rag/documents/d1?workspaceId=w1']);
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('reports a document-delete refusal as a tool error, not a success', async () => {
+    // Delete needs the delete scope plus an owner/admin role; a key refused it must
+    // see an error rather than a silent success that reads as "the document is gone".
+    const client = await connect(apiWith(403, '{"error":"FORBIDDEN: Owner or admin role required to delete documents"}'));
+
+    const result = await client.callTool({
+      name: 'delete_document',
+      arguments: { workspaceId: 'w1', documentId: 'd1' },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('403');
   });
 });

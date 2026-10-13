@@ -5,8 +5,8 @@
  * before it reaches a database call. Otherwise Postgres raises 22P02 and the
  * outer handler answers 500 with raw database text — a wrong status for a client
  * mistake, and a leak of internal detail. This extends the capability-discovery
- * `INVALID_WORKSPACE_ID` contract to the file, gallery, activity, job, and share
- * routes.
+ * `INVALID_WORKSPACE_ID` contract to the file, gallery, activity, job, share, and
+ * RAG document routes.
  */
 
 import { expect, test, APIRequestContext } from '@playwright/test';
@@ -36,7 +36,7 @@ test.describe('Identifier validation', () => {
     const headers = bearer(sessionToken);
     const workspaceId = workspace.id;
 
-    const cases: Array<{ method: 'get' | 'post' | 'delete'; path: string }> = [
+    const cases: Array<{ method: 'get' | 'post' | 'delete'; path: string; data?: unknown }> = [
       { method: 'get', path: `/api/files?workspaceId=${NOT_A_UUID}` },
       { method: 'get', path: `/api/gallery?workspaceId=${NOT_A_UUID}` },
       { method: 'get', path: `/api/activity?workspaceId=${NOT_A_UUID}` },
@@ -47,10 +47,18 @@ test.describe('Identifier validation', () => {
       { method: 'post', path: `/api/files/${NOT_A_UUID}/archive?workspaceId=${workspaceId}` },
       { method: 'post', path: `/api/jobs/${NOT_A_UUID}/retry?workspaceId=${workspaceId}` },
       { method: 'delete', path: `/api/shares/${NOT_A_UUID}?workspaceId=${workspaceId}` },
+      { method: 'get', path: `/api/rag/documents?workspaceId=${NOT_A_UUID}` },
+      { method: 'get', path: `/api/rag/documents/${NOT_A_UUID}?workspaceId=${workspaceId}` },
+      {
+        method: 'post',
+        path: `/api/rag/documents/${NOT_A_UUID}/rename`,
+        data: { workspaceId, title: 'whatever' },
+      },
+      { method: 'delete', path: `/api/rag/documents/${NOT_A_UUID}?workspaceId=${workspaceId}` },
     ];
 
-    for (const { method, path } of cases) {
-      const response = await request[method](path, { headers });
+    for (const { method, path, data } of cases) {
+      const response = await request[method](path, { headers, ...(data === undefined ? {} : { data }) });
       expect(response.status(), `${method.toUpperCase()} ${path}`).toBe(400);
       const body = JSON.stringify(await response.json());
       expect(body, `${method.toUpperCase()} ${path} leaked database detail`).not.toMatch(
