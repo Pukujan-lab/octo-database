@@ -7,7 +7,7 @@ from pathlib import Path
 
 MIGRATION_PATH = (
     Path(__file__).parent.parent
-    / "supabase"
+    / "db"
     / "migrations"
     / "20261007000000_slice10_graph_projection.sql"
 )

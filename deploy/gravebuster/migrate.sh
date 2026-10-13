@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Octo Migration Runner (Gravebuster)
 #
-# Applies the canonical migrations in supabase/migrations/ to the live database and
+# Applies the canonical migrations in db/migrations/ to the live database and
 # records each in octo.schema_migrations, so a deploy brings the schema up to the
 # code it is about to run. deploy.sh calls this before starting the API; without it
 # a deploy could run new code against an old schema (the drift that once broke
@@ -30,7 +30,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MIGRATIONS_DIR="${MIGRATIONS_DIR:-$SCRIPT_DIR/../../supabase/migrations}"
+MIGRATIONS_DIR="${MIGRATIONS_DIR:-$SCRIPT_DIR/../../db/migrations}"
 TRACKING_TABLE="octo.schema_migrations"
 
 # How to reach psql. Defaults to the compose-managed octo-db container; override for

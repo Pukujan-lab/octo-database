@@ -1,120 +1,134 @@
-// Same-origin client for Octo's HTTP API. Every authenticated call carries the
-// bearer session token; a 401 ends the session and returns the app to login.
-
-export const TOKEN_KEY = 'octo_token';
-export const PRINCIPAL_KEY = 'octo_principal';
-export const SIGNED_OUT_EVENT = 'octo-signed-out';
+import { announceExpiry, clearSession, getToken } from "./session";
 
 export class ApiError extends Error {
   status: number;
-  code: string | undefined;
+  code?: string;
+
   constructor(message: string, status: number, code?: string) {
     super(message);
+    this.name = "ApiError";
     this.status = status;
     this.code = code;
   }
 }
 
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
+/** The code the server answers with when the account has no confirmation secret. */
+export const CONFIRM_SECRET_NOT_SET = "CONFIRM_SECRET_NOT_SET";
 
-export function getStoredPrincipal<T>(): T | null {
-  const raw = localStorage.getItem(PRINCIPAL_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
+/** Machine codes the API returns are turned into sentences at the boundary, so
+ *  every surface shows a useful message rather than a raw constant. */
+const FRIENDLY: Record<string, string> = {
+  TURNSTILE_FAILED: "Human verification failed. Complete the challenge and try again.",
+  CONFIRM_SECRET_NOT_SET: "Set a confirmation secret first — it gates destructive actions.",
+  ACCOUNT_KEY_EXISTS: "An account-wide key already exists for this account.",
+  SLUG_TAKEN: "That workspace slug is already taken.",
+  WORKSPACE_DAILY_LIMIT: "This account has used its workspace allowance for today.",
+  SHARE_NOT_FOUND_OR_INACTIVE: "This share link is not available.",
+  GOOGLE_AUTH_NOT_CONFIGURED: "Google sign-in is not configured on this server.",
+  JOB_TYPE_RESERVED: "That job type is reserved — use the archive or restore action instead.",
+  SESSION_EXPIRED: "Your session expired. Please sign in again.",
+};
 
-/** Clears the session and notifies the app so it can return to the login screen. */
-export function endSession(): void {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(PRINCIPAL_KEY);
-  window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
-}
+type RequestOptions = {
+  method?: string;
+  body?: unknown;
+  /** `public` calls (the share viewer) send no bearer token and never end the session. */
+  authMode?: "session" | "public";
+  /** Auth endpoints answer 401 legitimately — they must not sign the user out. */
+  endSessionOn401?: boolean;
+};
 
-export function authHeaders(): Record<string, string> {
+export function authHeaders(): HeadersInit {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function parseError(response: Response): Promise<ApiError> {
-  const body = (await response.json().catch(() => ({}))) as { error?: string };
-  const raw = body.error ?? response.statusText;
-  // Server errors read "CODE: human message"; keep both.
-  const code = raw.includes(':') ? raw.slice(0, raw.indexOf(':')).trim() : raw;
-  return new ApiError(raw, response.status, code);
-}
-
-/** GET a JSON resource. Throws ApiError; a 401 ends the session. */
-export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(path, { headers: authHeaders() });
-  if (response.status === 401) {
-    endSession();
-    throw new ApiError('Session expired', 401, 'UNAUTHENTICATED');
+export function qs(params: Record<string, string | number | undefined | null>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "") continue;
+    search.set(key, String(value));
   }
-  if (!response.ok) throw await parseError(response);
-  return (await response.json()) as T;
+  const out = search.toString();
+  return out ? `?${out}` : "";
 }
 
-/** POST/PATCH/DELETE with an optional JSON body. */
-export async function apiSend<T>(
-  path: string,
-  method: 'POST' | 'PATCH' | 'DELETE',
-  body?: unknown
-): Promise<T> {
-  const response = await fetch(path, {
-    method,
-    headers: {
-      ...authHeaders(),
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (response.status === 401) {
-    endSession();
-    throw new ApiError('Session expired', 401, 'UNAUTHENTICATED');
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const mode = options.authMode ?? "session";
+  const headers: HeadersInit = {
+    ...(mode === "session" ? authHeaders() : {}),
+    ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: options.method ?? "GET",
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+  } catch {
+    throw new ApiError("Cannot reach the Octo API. Check that this app is served same-origin.", 0);
   }
-  if (!response.ok) throw await parseError(response);
-  const contentType = response.headers.get('content-type') ?? '';
-  if (!contentType.includes('json')) return undefined as T;
-  return (await response.json()) as T;
-}
 
-/**
- * A server error reads "CODE: human message". Show the code so the reader can
- * recognise it (a form needs the code, e.g. WORKSPACE_DAILY_LIMIT) and the
- * sentence so the screen is not just a token.
- */
-export function formError(error: unknown): string {
-  const message = error instanceof Error ? error.message : 'Could not complete this action.';
-  const separator = message.indexOf(':');
-  if (separator === -1) return message;
-  const code = message.slice(0, separator).trim();
-  const detail = message.slice(separator + 1).trim();
-  if (!/^[A-Z][A-Z0-9_]*$/.test(code)) return message;
-  return detail ? `${code} — ${detail}` : code;
-}
-
-/** GET raw bytes as a Blob (file content downloads). */
-export async function apiBlob(path: string): Promise<Blob> {
-  const response = await fetch(path, { headers: authHeaders() });
-  if (response.status === 401) {
-    endSession();
-    throw new ApiError('Session expired', 401, 'UNAUTHENTICATED');
+  if (res.status === 401 && mode === "session" && options.endSessionOn401 !== false) {
+    clearSession();
+    announceExpiry("Your session expired. Please sign in again.");
+    throw new ApiError("Session expired", 401, "SESSION_EXPIRED");
   }
-  if (!response.ok) throw await parseError(response);
-  return response.blob();
+
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    // The server answers with "MACHINE_CODE: human sentence" (or a bare code).
+    // Split off the code so FRIENDLY lookups and errorCode() comparisons match.
+    const raw = body.error ?? res.statusText;
+    const sep = raw.indexOf(":");
+    const code = sep === -1 ? raw : raw.slice(0, sep);
+    throw new ApiError(FRIENDLY[code] ?? raw, res.status, code);
+  }
+
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError("Unexpected non-JSON response from the Octo API", res.status);
+  }
 }
 
-/** Anonymous GET for the public share viewer — no token, no 401 session handling. */
-export async function publicGet<T>(path: string): Promise<T> {
-  const response = await fetch(path);
-  if (!response.ok) throw await parseError(response);
-  return (await response.json()) as T;
+export const api = {
+  get: <T,>(path: string, options?: RequestOptions) => request<T>(path, { ...options, method: "GET" }),
+  post: <T,>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: "POST", body }),
+  patch: <T,>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: "PATCH", body }),
+  del: <T,>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: "DELETE", body }),
+};
+
+/** Raw bytes for an authenticated file download. */
+export async function fetchBlob(path: string): Promise<Blob> {
+  const res = await fetch(path, { headers: authHeaders() });
+  if (res.status === 401) {
+    clearSession();
+    announceExpiry("Your session expired. Please sign in again.");
+    throw new ApiError("Session expired", 401, "SESSION_EXPIRED");
+  }
+  if (!res.ok) throw new ApiError(`Download failed (${res.status})`, res.status);
+  return res.blob();
 }
 
-export const ws = (id: string) => `workspaceId=${encodeURIComponent(id)}`;
+export function isConfirmSecretMissing(error: unknown): boolean {
+  return error instanceof ApiError && error.code === CONFIRM_SECRET_NOT_SET;
+}
+
+export function errorCode(error: unknown): string | undefined {
+  return error instanceof ApiError ? error.code : undefined;
+}
+
+export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return "Something went wrong";
+}

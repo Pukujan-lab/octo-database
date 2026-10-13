@@ -1,37 +1,57 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
-import { ThemeProvider } from '@/lib/theme';
-import { SessionProvider, useSession } from '@/lib/session';
-import { WorkspaceProvider } from '@/lib/workspace';
-import { OctoProvider } from '@/lib/octo';
-import LoginPage from '@/pages/LoginPage';
-import Shell from '@/components/Shell';
-import PublicShare from '@/pages/PublicShare';
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import Index from "./pages/Index";
+import NotFound from "./pages/NotFound";
+import { PublicShareViewer } from "./views/PublicShareViewer";
+import { useTheme } from "./hooks/useTheme";
+import { ThemeControls } from "./components/portal/ThemeControls";
 
-/** The session decides which screen the root path shows. */
-function Root() {
-  const { principal, ready } = useSession();
-  if (!ready) return null;
-  if (!principal) return <LoginPage />;
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+      staleTime: 15 * 1000,
+    },
+  },
+});
+
+/** The share viewer is a standalone route: no shell, no bearer token. */
+function ShareRoute() {
+  const theme = useTheme();
   return (
-    <WorkspaceProvider>
-      <OctoProvider>
-        <Shell />
-      </OctoProvider>
-    </WorkspaceProvider>
+    <PublicShareViewer
+      themeControls={
+        <ThemeControls
+          design={theme.design}
+          onDesign={theme.setDesign}
+          isDark={theme.isDark}
+          onToggle={theme.toggleVariant}
+          compact
+        />
+      }
+    />
   );
 }
 
-export default function App() {
-  return (
-    <ThemeProvider>
-      <SessionProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/share/:token" element={<PublicShare />} />
-            <Route path="*" element={<Root />} />
-          </Routes>
-        </BrowserRouter>
-      </SessionProvider>
-    </ThemeProvider>
-  );
-}
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner position="bottom-right" />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Index />} />
+          {/* Tokens may themselves contain slashes, so the splat is decoded whole. */}
+          <Route path="/share/*" element={<ShareRoute />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </BrowserRouter>
+    </TooltipProvider>
+  </QueryClientProvider>
+);
+
+export default App;
