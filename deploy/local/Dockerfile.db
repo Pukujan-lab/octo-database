@@ -1,4 +1,4 @@
 FROM pgvector/pgvector:pg16
 
 COPY deploy/gravebuster/initdb/00-supabase-auth-scaffold.sql /docker-entrypoint-initdb.d/00-supabase-auth-scaffold.sql
-COPY supabase/migrations/*.sql /docker-entrypoint-initdb.d/
+COPY db/migrations/*.sql /docker-entrypoint-initdb.d/

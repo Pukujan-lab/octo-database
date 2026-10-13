@@ -10,7 +10,7 @@
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { generateSecret, generateURI, verifySync } from 'otplib/functional';
-import { hashApiKeySecret } from '../api/keys';
+import { hashApiKeySecret } from './secret-hash';
 
 const ISSUER = 'Octo';
 

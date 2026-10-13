@@ -5,10 +5,8 @@
   "description": "Reusable self-hosted control plane for workspaces, files, and agents",
   "type": "module",
   "scripts": {
-    "dev": "npm --prefix frontend-v2 run dev",
-    "dev:legacy": "npm --prefix frontend run dev",
-    "build": "npm --prefix frontend-v2 run build",
-    "build:legacy": "npm --prefix frontend run build",
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
     "server": "tsx src/server/index.ts",
     "production-smoke": "tsx scripts/production-smoke.ts",
     "capture-ops": "tsx scripts/capture-ops.ts",
@@ -17,6 +15,7 @@
     "export-vectors": "tsx scripts/export-vectors.ts",
     "mcp": "tsx scripts/octo-mcp.ts",
     "typecheck": "tsc --noEmit",
+    "lint:imports": "depcruise src scripts --config .dependency-cruiser.cjs",
     "test": "vitest run"
   },
   "dependencies": {
@@ -33,6 +32,7 @@
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.0",
+    "dependency-cruiser": "^18.6.0",
     "tsx": "^4.23.15",
     "typescript": "^5.7.0",
     "vite": "^8.3.1",

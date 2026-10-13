@@ -46,6 +46,7 @@ describe('Octo MCP adapter', () => {
       'download_file',
       'get_ops_summary',
       'graph_health',
+      'ingest_document',
       'list_files',
       'list_ops_events',
       'list_workspaces',
