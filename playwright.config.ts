@@ -63,7 +63,7 @@ export default defineConfig({
       },
     },
     {
-      command: 'npm --prefix frontend-v2 run dev',
+      command: 'npm --prefix frontend run dev',
       url: 'http://localhost:3000',
       reuseExistingServer: !process.env['CI'],
       timeout: 30000,

@@ -5,10 +5,8 @@
   "description": "Reusable self-hosted control plane for workspaces, files, and agents",
   "type": "module",
   "scripts": {
-    "dev": "npm --prefix frontend-v2 run dev",
-    "dev:legacy": "npm --prefix frontend run dev",
-    "build": "npm --prefix frontend-v2 run build",
-    "build:legacy": "npm --prefix frontend run build",
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
     "server": "tsx src/server/index.ts",
     "production-smoke": "tsx scripts/production-smoke.ts",
     "capture-ops": "tsx scripts/capture-ops.ts",
