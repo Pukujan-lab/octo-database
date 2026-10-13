@@ -7,6 +7,8 @@
 
 import pg from 'pg';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { GraphProjectionRow, GraphProjectionRecord } from '../types/graph';
+export type { GraphProjectionRow, GraphProjectionRecord } from '../types/graph';
 const { Pool } = pg;
 
 /**
@@ -2037,19 +2039,6 @@ export function dbEpistemicWatermarkService(workspaceId: string) {
   return epistemicWatermark(queryService, workspaceId);
 }
 
-export interface GraphProjectionRow {
-  workspaceId: string;
-  schemaVersion: string;
-  sourceWatermark: string;
-  entityCount: number;
-  claimCount: number;
-  evidenceCount: number;
-  relationCount: number;
-  status: 'projected' | 'failed';
-  lastError: string | null;
-  updatedAt: string;
-}
-
 export async function dbGetGraphProjection(workspaceId: string): Promise<GraphProjectionRow | null> {
   const rows = await query<GraphProjectionRow>(
     `SELECT workspace_id AS "workspaceId", schema_version AS "schemaVersion",
@@ -2061,19 +2050,6 @@ export async function dbGetGraphProjection(workspaceId: string): Promise<GraphPr
     [workspaceId]
   );
   return rows[0] ?? null;
-}
-
-/** The projection bookkeeping a run records: its watermark and counts, or a failure. */
-export interface GraphProjectionRecord {
-  workspaceId: string;
-  schemaVersion: string;
-  sourceWatermark: string;
-  entityCount: number;
-  claimCount: number;
-  evidenceCount: number;
-  relationCount: number;
-  status: 'projected' | 'failed';
-  lastError: string | null;
 }
 
 /** Records the outcome of a projection run (a successful watermark or a failure). */

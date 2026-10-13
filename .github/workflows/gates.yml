@@ -94,6 +94,12 @@ jobs:
       - name: TypeScript type check
         run: npm run typecheck
 
+      - name: Import boundary check (dependency-cruiser)
+        # The repository shape is machine-checked, not advisory: this fails the
+        # required `gates` check on any import that crosses a layer boundary the
+        # wrong way. See docs/ARCHITECTURE.md and .dependency-cruiser.cjs.
+        run: npm run lint:imports
+
       - name: Frontend and authorization tests
         run: npm test
 

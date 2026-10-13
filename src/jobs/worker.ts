@@ -17,7 +17,7 @@ import { ArchiveDeps, ArchiveFileRecord, archiveFile, restoreFile } from '../sto
 import { ClaimedJob, completeJob, failJob, recordActivity } from './job-service';
 import type { GraphClient } from '../graph/falkordb-client';
 import { GRAPH_SCHEMA_VERSION, ProjectionInput, projectWorkspaceGraph } from '../graph/projector';
-import type { GraphProjectionRecord } from '../server/db';
+import type { GraphProjectionRecord } from '../types/graph';
 
 /**
  * Graph projection wiring for a `graph_rebuild` job. The graph is a rebuildable read
