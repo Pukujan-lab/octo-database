@@ -26,7 +26,20 @@ function asError(error: unknown): {
 }
 
 export function createOctoMcpServer(api: OctoApi): McpServer {
-  const server = new McpServer({ name: 'octo', version: '0.1.0' });
+  // Orientation the client receives at connect time, so an agent does not have to
+  // learn the platform's rules by trial. Mirrors docs/consuming-octo.md.
+  const server = new McpServer(
+    { name: 'octo', version: '0.1.0' },
+    {
+      instructions: [
+        'Octo is a self-hosted workspace data platform and the data layer for the projects it serves.',
+        "A workspace's durable data lives in Octo: do not stand up a separate database for a project Octo serves. Provision the workspace database through Octo and reach it with query_workspace_database, or with its own connection string.",
+        'A workspace-scoped key (octo_live_ws_) reaches only its own workspace and cannot create workspaces or mint keys — both are human-stamped. An account-wide key (octo_live_acc_) manages every workspace the principal belongs to.',
+        'The epistemic ledger is append-only and bitemporal: record_epistemic writes; query_claims_as_of and query_belief_as_of read as of a recorded-time and/or valid-time instant.',
+        "Octo's repository is read-only to adopters: propose a change as an OIO observational issue, never a pull request.",
+      ].join(' '),
+    }
+  );
 
   server.tool('whoami', 'Identify the principal and scopes behind the configured Octo token.', {}, async () => {
     try {
