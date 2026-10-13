@@ -108,3 +108,15 @@ Do not intentionally commit credential values, refresh/access tokens, private ke
 ## Working-repository boundary
 
 Make Octo changes in this repository. Cross-repository changes are made only when the owner explicitly directs them or they are necessary to operate an owner-selected shared dependency.
+
+## Adopters do not modify this repository
+
+Octo's adopters (agents and humans consuming Octo from another project, e.g. over its API, MCP, or SQL surfaces) have **no write access to this repository in any form**. They may not open pull requests, push branches, edit files, or otherwise change anything in this repo to meet their own needs — even "documentation fixes" or changes they believe are required to make Octo work for them.
+
+How an adopter contributes instead:
+
+1. **Propose, don't patch.** File an issue under the OIO observational-issue protocol (`.github/ISSUE_TEMPLATE/observational-issue.yml`; upstream `Pukujan/observational-issue-ops`) describing the need, with provenance and evidence. Everything filed there is a **non-binding proposal** — it confers no right to implement.
+2. **Human consent gates everything.** A proposal is acted on only if the **owner** accepts it, and any resulting change is made by an agent the owner directs — never by the adopter. No proposal author, adopter agent, or external tool may open a PR against this repo, with or without the owner's verbal approval; consent means the owner hands the work to their own agents here.
+3. **Work around, don't fork the platform.** If Octo lacks a capability an adopter needs, the adopter builds that capability **in their own project** against Octo's public surfaces, or files the proposal and waits. Adapting Octo itself is not an option available to them.
+
+The owner remains the sole exception: the owner and owner-directed agents change this repository as always.

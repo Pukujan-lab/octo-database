@@ -9,6 +9,28 @@ SQL surface or — when you need a direct connection — with its own connection
 
 ---
 
+## You consume Octo; you do not change it
+
+**Octo's repository is read-only to its adopters.** Consuming Octo (via its API, MCP, or
+SQL surfaces) grants **no write access to this repository in any form** — no pull
+requests, no branches, no file edits, not even "documentation fixes", and not even to
+make Octo "work for you". Octo is the platform; your project is a client of it.
+
+If Octo lacks something you need:
+
+1. **Propose it — don't patch it.** File an issue under the OIO observational-issue
+   protocol (`[OBSERVATION]` template). It is a **non-binding proposal**, not a mandate.
+2. **Human consent gates everything.** A proposal becomes work only if the **owner**
+   accepts it, and the change is made by an agent the owner directs — never by the
+   adopter. Do not open a PR against Octo, with or without verbal approval.
+3. **Work around it in your own project, or wait.** Build what you need against Octo's
+   public surfaces in your own repo; adapting Octo itself is not something an adopter
+   does.
+
+See `AGENTS.md` → "Adopters do not modify this repository" for the operative rule.
+
+---
+
 ## The rule
 
 Do **not** provision, scaffold, or recommend a database for an Octo-served project.
@@ -179,4 +201,10 @@ with its own scoped role (pgvector-ready). Reach it either way:
 Only depart from this if you can demonstrate a concrete incompatibility, and
 surface that to the owner before building anything. See Octo's
 `docs/consuming-octo.md` (repo: octo-database) and incident #162.
+
+**Octo's repo is read-only to you.** You consume Octo; you do not change it — no
+pull requests, branches, or file edits against `octo-database`, not even to make
+Octo "work for you". Need something Octo lacks? File an OIO `[OBSERVATION]`
+proposal (non-binding) and let the owner decide; build workarounds in *this*
+project against Octo's public surfaces.
 ```
