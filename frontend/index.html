@@ -1,10 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark" data-design="midnight">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Octo — workspace data platform" />
-    <title>Octo</title>
+    <title>Octo Portal — workspace data platform</title>
+    <meta name="description" content="Octo Portal: the control dashboard for your self-hosted workspace data platform." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // Apply the persisted design system + variant before first paint (no flash of default theme).
+      (function () {
+        try {
+          var root = document.documentElement;
+          var design = localStorage.getItem('octo_design_system') || 'midnight';
+          var variant = localStorage.getItem('octo_theme_variant') || 'dark';
+          root.setAttribute('data-design', design);
+          root.classList.toggle('dark', variant === 'dark');
+        } catch (e) {
+          /* storage blocked — keep the markup defaults */
+        }
+      })();
+    </script>
   </head>
 
   <body>

@@ -3,11 +3,11 @@ FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-# The app is built from frontend-v2, carrying its own dependency tree; the root
+# The app is built from frontend, carrying its own dependency tree; the root
 # install alone would not pull it in. `.npmrc` must come along too: it sets
 # legacy-peer-deps, without which the install fails on peers.
-COPY frontend-v2/package.json frontend-v2/package-lock.json frontend-v2/.npmrc ./frontend-v2/
-RUN npm ci && npm --prefix frontend-v2 ci
+COPY frontend/package.json frontend/package-lock.json frontend/.npmrc ./frontend/
+RUN npm ci && npm --prefix frontend ci
 
 COPY . .
 RUN npm run build

@@ -16,6 +16,8 @@
 
 - **Helper pins synced to the certified release train (2026-10-11, PR #224, commit `348da81`)**: ACS hot-loader `38f8f52` (pre-mesh, no `stack-mesh.json` enforcement) → ACS 0.2.0 module v0.1.0 @ `3df982a`; PCM 0.6.0 @ `4e23854` → 0.7.0 @ `85e6aa7`; CGM @ `6831f91` → 0.5.12 @ `5c8c5f1`; OIO 0.1.0 @ `402a46e` recorded in `.coord/assignment.json` pins + AGENTS.md/HANDOFF.md. `gates.yml` now validates with the new hotloader, which enforces the mesh. `stack-manifest.json` keeps empty pins (follows the train). This required ACS PR #89 first (merged `3df982a` — its runs were parked at `action_required` and its example assignment template had gone stale against the moved mesh; both fixed before merge). Verified locally: train `check_manifest` OK, PCM `continuity validate` VALID, CGM validator VALID, `hotload_check` exit 0. Not promoted to `production` — pins affect CI only, not the running app.
 
+- **Platform-audit research note (2026-10-13)**: `docs/research/2026-10-13-platform-audit-observability-oio-and-placement.md` — no read-path logging, evidence pointer-only, two-tier tree, backup posture (#202), OIO full install (PR #230), dev/app layer split, a2a storage-class rule (ACS #91), consumer-capability answers.
+
 ## Owner corrections & anti-overengineering
 
 - Anti-overengineering rules active in AGENTS.md: zero unsolicited security layers or speculative abstractions.

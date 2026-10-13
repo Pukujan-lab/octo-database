@@ -1,36 +1,32 @@
-// Row and response shapes, taken verbatim from the API inventory in
-// docs/specs/2026-10-10-frontend-v2-spec.md §10. Nothing here is invented.
+/** Row shapes returned by Octo's HTTP API. Nothing here is invented: every field
+ *  matches a documented route in the API inventory. */
 
-export interface Principal {
+export type Principal = {
   id: string;
-  authUserId?: string | null;
   email: string | null;
-  displayName: string | null;
-  avatarUrl?: string | null;
+  displayName: string;
   isGuest: boolean;
   isPlatformOwner: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-}
+};
 
-export interface HealthResponse {
-  status: string;
-  version: string;
-  database: { connected: boolean; version?: string };
-  r2: { connected: boolean; bucket: string | null };
-  googleAuthEnabled: boolean;
-  turnstileSiteKey: string | null;
-}
-
-export interface MeResponse {
+export type MeResponse = {
   principal: Principal;
-  apiKey: { id: string; scopes: string[] } | null;
+  apiKey: unknown | null;
   confirmSecretSet: boolean;
   mfaEnabled: boolean;
   mfaRecoveryCodesRemaining: number;
-}
+};
 
-export interface Workspace {
+export type Health = {
+  status: string;
+  version: string;
+  database: { connected: boolean; version?: string };
+  r2: { connected: boolean; bucket?: string | null };
+  googleAuthEnabled: boolean;
+  turnstileSiteKey: string | null;
+};
+
+export type Workspace = {
   id: string;
   slug: string;
   name: string;
@@ -38,34 +34,51 @@ export interface Workspace {
   role: string;
   isOwner: boolean;
   retentionDays: number | null;
-}
+};
 
-export type ArchiveState = string;
-
-export interface FileRecord {
+export type FileRecord = {
   id: string;
   name: string;
   sizeBytes: number;
   mimeType: string;
   storageKey: string;
   createdAt: string;
-  archiveState: ArchiveState;
+  archiveState: string;
   publishedAt: string | null;
   publishedUrl: string | null;
-}
+};
 
-export interface GalleryItem {
+export type GalleryItem = {
   id: string;
   name: string;
   mimeType: string;
   sizeBytes: number;
-  kind: 'image' | 'video';
+  kind: "image" | "video" | string;
   thumbnailUrl: string;
   fullUrl: string;
   createdAt: string;
-}
+};
 
-export interface ApiKeyRow {
+export type JobRow = {
+  id: string;
+  jobType: string;
+  state: string;
+  attempts: number;
+  maxAttempts: number;
+  errorSummary: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type ActivityRow = {
+  id: string;
+  eventType: string;
+  summary: string;
+  jobId: string | null;
+  createdAt: string;
+};
+
+export type ApiKey = {
   id: string;
   prefix: string;
   name: string;
@@ -76,13 +89,13 @@ export interface ApiKeyRow {
   lastUsedAt: string | null;
   createdAt: string;
   isAccountWide: boolean;
-}
+};
 
-export interface ShareRow {
+export type ShareRow = {
   id: string;
   workspaceId: string;
   resourceType: string;
-  resourceId: string | null;
+  resourceId: string;
   tokenPrefix: string;
   permission: string;
   validFrom: string | null;
@@ -91,53 +104,35 @@ export interface ShareRow {
   createdAt: string;
   lastAccessedAt: string | null;
   accessCount: number;
-}
+};
 
-export interface JobRow {
-  id: string;
-  jobType: string;
-  state: string;
-  attempts: number;
-  maxAttempts: number;
-  errorSummary: string | null;
-  createdAt: string;
-  completedAt: string | null;
-}
-
-export interface ActivityRow {
-  id: string;
-  eventType: string;
-  summary: string;
-  jobId: string | null;
-  createdAt: string;
-}
-
-export interface OpsSummary {
-  failureCounts: {
+export type OpsSummary = {
+  failureCounts: Array<{
     errorCode: string | null;
     severity: string | null;
     source: string | null;
     eventCount: number;
     lastSeen: string | null;
-  }[];
-  failuresByJobTypeDay: {
+  }>;
+  failuresByJobTypeDay: Array<{
     day: string;
     jobType: string;
     errorCode: string | null;
     eventCount: number;
-  }[];
-  unhealthyJobs: {
-    jobId: string;
+  }>;
+  unhealthyJobs: Array<{
+    jobId?: string;
+    id?: string;
     jobType: string;
     state: string;
     attempt: number;
     maxAttempts: number;
-    updatedAt: string;
+    updatedAt: string | null;
     errorCode: string | null;
-  }[];
-}
+  }>;
+};
 
-export interface PublicShare {
+export type PublicShare = {
   share: {
     id: string;
     resourceType: string;
@@ -145,13 +140,23 @@ export interface PublicShare {
     validUntil: string | null;
   };
   items: GalleryItem[];
-}
+};
 
-export interface MfaStatus {
+export type DeleteWorkspaceResult = {
+  success: boolean;
+  workspaceId: string;
+  slug: string;
+  orphanedObjects: number;
+  orphanedDatabase: number;
+  orphanedGraph: number;
+};
+
+export type MfaStatus = {
   enabled: boolean;
   confirmedAt: string | null;
   recoveryCodesRemaining: number;
-}
+};
 
-export const KEY_SCOPES = ['read', 'write', 'files', 'delete'] as const;
+/** Scopes that the key editor exposes. */
+export const KEY_SCOPES = ["read", "write", "files", "delete"] as const;
 export type KeyScope = (typeof KEY_SCOPES)[number];

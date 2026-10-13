@@ -89,10 +89,16 @@ jobs:
       - name: Install frontend dependencies
         # The e2e webServer starts the frontend dev server, so its tree must be
         # installed even though the root install does not cover it.
-        run: npm ci --prefix frontend-v2
+        run: npm ci --prefix frontend
 
       - name: TypeScript type check
         run: npm run typecheck
+
+      - name: Import boundary check (dependency-cruiser)
+        # The repository shape is machine-checked, not advisory: this fails the
+        # required `gates` check on any import that crosses a layer boundary the
+        # wrong way. See docs/ARCHITECTURE.md and .dependency-cruiser.cjs.
+        run: npm run lint:imports
 
       - name: Frontend and authorization tests
         run: npm test
@@ -114,7 +120,7 @@ jobs:
           EOF
           # Apply every migration in lexical order so new slices are picked up
           # automatically instead of needing this list maintained by hand.
-          for migration in $(ls supabase/migrations/*.sql | sort); do
+          for migration in $(ls db/migrations/*.sql | sort); do
             echo "applying $migration"
             PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54329 -U postgres < "$migration"
           done
@@ -138,7 +144,7 @@ jobs:
         run: |
           MIGRATE_BASELINE=1 bash deploy/gravebuster/migrate.sh
           RECORDED=$(PGPASSWORD=postgres psql -tAc "SELECT count(*) FROM octo.schema_migrations" -h localhost -p 54329 -U postgres)
-          EXPECTED=$(ls supabase/migrations/*.sql | wc -l)
+          EXPECTED=$(ls db/migrations/*.sql | wc -l)
           echo "recorded=${RECORDED} expected=${EXPECTED}"
           [ "$RECORDED" -eq "$EXPECTED" ]
           bash deploy/gravebuster/migrate.sh

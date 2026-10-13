@@ -162,6 +162,20 @@ export class OctoApi {
     });
   }
 
+  ingestDocument(input: {
+    workspaceId: string;
+    title: string;
+    text: string;
+    mimeType?: string;
+  }): Promise<unknown> {
+    return this.request('POST', '/api/rag/documents', {
+      workspaceId: input.workspaceId,
+      title: input.title,
+      text: input.text,
+      ...(input.mimeType === undefined ? {} : { mimeType: input.mimeType }),
+    });
+  }
+
   graphQuery(input: {
     workspaceId: string;
     query: string;
