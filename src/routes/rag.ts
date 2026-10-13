@@ -8,8 +8,9 @@
 import { embedTexts, loadEmbeddingConfigFromEnv } from '../rag/embeddings';
 import { chunkKey, chunkText, contentHash, extractText } from '../rag/pipeline';
 import { authenticateRequest, keyWorkspaceMatches, requireScope, roleAllows, scopeDenied } from '../server/auth-context';
-import { dbEnsureEmbeddingConfig, dbGetWorkspaceMembership, dbMatchChunks, dbReplaceChunksAndEmbeddings, dbUpsertDocumentVersion, query } from '../server/db';
+import { dbDeleteDocument, dbEnsureEmbeddingConfig, dbGetDocument, dbGetWorkspaceMembership, dbListDocuments, dbMatchChunks, dbRenameDocument, dbReplaceChunksAndEmbeddings, dbUpsertDocumentVersion, query } from '../server/db';
 import { readJsonObject, requireUuid, sendJson } from '../server/http';
+import { attributeAgentAction } from '../server/ops';
 import { IncomingMessage, ServerResponse } from 'http';
 
 export async function handleRagRoutes(
@@ -188,6 +189,177 @@ export async function handleRagRoutes(
       // configuration that produced it.
     });
     return true;
+  }
+
+  // Document lifecycle: list, get, rename, delete. Edit is rename only -- a
+  // document's versions are immutable and content-hashed, so changing the text is
+  // a re-ingest (a new version), never an in-place rewrite.
+
+  // List: GET /api/rag/documents?workspaceId=<id>
+  if (pathname === '/api/rag/documents' && req.method === 'GET') {
+    const auth = await authenticateRequest(req);
+    if (!auth) {
+      sendJson(res, 401, { error: 'UNAUTHENTICATED' });
+      return true;
+    }
+    if (!requireScope(auth, 'read')) {
+      scopeDenied(res, 'read');
+      return true;
+    }
+
+    const workspaceId = url.searchParams.get('workspaceId');
+    if (!workspaceId) {
+      sendJson(res, 400, { error: 'workspaceId is required' });
+      return true;
+    }
+    if (!requireUuid(res, workspaceId, 'workspaceId')) return true;
+    if (!keyWorkspaceMatches(auth, workspaceId)) {
+      sendJson(res, 403, { error: 'FORBIDDEN: Key restricted to different workspace' });
+      return true;
+    }
+
+    const mem = await dbGetWorkspaceMembership(workspaceId, auth.principal.id);
+    if (!mem) {
+      sendJson(res, 403, { error: 'FORBIDDEN: Not a member of this workspace' });
+      return true;
+    }
+
+    sendJson(res, 200, await dbListDocuments(workspaceId));
+    return true;
+  }
+
+  if (pathname.startsWith('/api/rag/documents/')) {
+    const rest = pathname.slice('/api/rag/documents/'.length);
+    const isRename = rest.endsWith('/rename');
+    const documentId = isRename ? rest.slice(0, -'/rename'.length) : rest;
+
+    // Get one with its versions: GET /api/rag/documents/<id>?workspaceId=<id>
+    if (!isRename && req.method === 'GET') {
+      const auth = await authenticateRequest(req);
+      if (!auth) {
+        sendJson(res, 401, { error: 'UNAUTHENTICATED' });
+        return true;
+      }
+      if (!requireScope(auth, 'read')) {
+        scopeDenied(res, 'read');
+        return true;
+      }
+
+      const workspaceId = url.searchParams.get('workspaceId');
+      if (!workspaceId) {
+        sendJson(res, 400, { error: 'workspaceId is required' });
+        return true;
+      }
+      if (!requireUuid(res, workspaceId, 'workspaceId')) return true;
+      if (!requireUuid(res, documentId, 'documentId')) return true;
+      if (!keyWorkspaceMatches(auth, workspaceId)) {
+        sendJson(res, 403, { error: 'FORBIDDEN: Key restricted to different workspace' });
+        return true;
+      }
+
+      const mem = await dbGetWorkspaceMembership(workspaceId, auth.principal.id);
+      if (!mem) {
+        sendJson(res, 403, { error: 'FORBIDDEN: Not a member of this workspace' });
+        return true;
+      }
+
+      const doc = await dbGetDocument(workspaceId, documentId);
+      if (!doc) {
+        sendJson(res, 404, { error: 'DOCUMENT_NOT_FOUND' });
+        return true;
+      }
+      sendJson(res, 200, doc);
+      return true;
+    }
+
+    // Rename: POST /api/rag/documents/<id>/rename  body {workspaceId, title}
+    if (isRename && req.method === 'POST') {
+      const auth = await authenticateRequest(req);
+      if (!auth) {
+        sendJson(res, 401, { error: 'UNAUTHENTICATED' });
+        return true;
+      }
+      if (!requireScope(auth, 'write')) {
+        scopeDenied(res, 'write');
+        return true;
+      }
+
+      const parsed = (await readJsonObject(req)) as Record<string, any>;
+      const { workspaceId, title } = parsed;
+      if (!workspaceId || typeof title !== 'string' || title.trim() === '') {
+        sendJson(res, 400, { error: 'workspaceId and a non-empty title are required' });
+        return true;
+      }
+      if (!requireUuid(res, workspaceId, 'workspaceId')) return true;
+      if (!requireUuid(res, documentId, 'documentId')) return true;
+      if (!keyWorkspaceMatches(auth, workspaceId)) {
+        sendJson(res, 403, { error: 'FORBIDDEN: Key restricted to different workspace' });
+        return true;
+      }
+
+      const mem = await dbGetWorkspaceMembership(workspaceId, auth.principal.id);
+      if (!mem || !roleAllows(auth, mem.role, 'operator')) {
+        sendJson(res, 403, { error: 'FORBIDDEN: Operator role or higher required to rename documents' });
+        return true;
+      }
+
+      try {
+        const renamed = await dbRenameDocument(workspaceId, documentId, title);
+        if (!renamed) {
+          sendJson(res, 404, { error: 'DOCUMENT_NOT_FOUND' });
+          return true;
+        }
+        await attributeAgentAction(auth, workspaceId, 'document.renamed', `Document ${documentId} renamed`);
+        sendJson(res, 200, renamed);
+      } catch (err) {
+        if ((err as { code?: string }).code === '23505') {
+          sendJson(res, 409, { error: 'DOCUMENT_TITLE_EXISTS' });
+          return true;
+        }
+        throw err;
+      }
+      return true;
+    }
+
+    // Delete a document and its derived rows: DELETE /api/rag/documents/<id>?workspaceId=<id>
+    if (!isRename && req.method === 'DELETE') {
+      const auth = await authenticateRequest(req);
+      if (!auth) {
+        sendJson(res, 401, { error: 'UNAUTHENTICATED' });
+        return true;
+      }
+      if (!requireScope(auth, 'delete')) {
+        scopeDenied(res, 'delete');
+        return true;
+      }
+
+      const workspaceId = url.searchParams.get('workspaceId');
+      if (!workspaceId) {
+        sendJson(res, 400, { error: 'workspaceId is required' });
+        return true;
+      }
+      if (!requireUuid(res, workspaceId, 'workspaceId')) return true;
+      if (!requireUuid(res, documentId, 'documentId')) return true;
+      if (!keyWorkspaceMatches(auth, workspaceId)) {
+        sendJson(res, 403, { error: 'FORBIDDEN: Key restricted to different workspace' });
+        return true;
+      }
+
+      const mem = await dbGetWorkspaceMembership(workspaceId, auth.principal.id);
+      if (!mem || !roleAllows(auth, mem.role, 'admin')) {
+        sendJson(res, 403, { error: 'FORBIDDEN: Owner or admin role required to delete documents' });
+        return true;
+      }
+
+      const deleted = await dbDeleteDocument(workspaceId, documentId);
+      if (!deleted) {
+        sendJson(res, 404, { error: 'DOCUMENT_NOT_FOUND' });
+        return true;
+      }
+      await attributeAgentAction(auth, workspaceId, 'document.deleted', `Document ${documentId} deleted`);
+      sendJson(res, 200, { documentId: deleted.documentId, deleted: true });
+      return true;
+    }
   }
 
   return false;

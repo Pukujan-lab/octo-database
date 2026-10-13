@@ -209,6 +209,44 @@ export const OCTO_CAPABILITIES: CapabilityDescriptor[] = [
       'Run a read-only Cypher query against an authorized workspace\'s graph. The graph name is derived from the workspace, never passed by the caller, so a query can never name another workspace\'s graph.',
   },
   {
+    action: 'rag.ingest',
+    method: 'POST',
+    path: '/api/rag/documents',
+    requiredScope: 'write',
+    description:
+      'Index a text document into an authorized workspace: chunk, embed, and store it so semantic query can retrieve it. Requires operator role or higher.',
+  },
+  {
+    action: 'rag.list',
+    method: 'GET',
+    path: '/api/rag/documents?workspaceId=<id>',
+    requiredScope: 'read',
+    description: 'List the documents indexed in an authorized workspace, with version and chunk counts.',
+  },
+  {
+    action: 'rag.get',
+    method: 'GET',
+    path: '/api/rag/documents/<id>?workspaceId=<id>',
+    requiredScope: 'read',
+    description: 'Read one indexed document and its immutable versions.',
+  },
+  {
+    action: 'rag.rename',
+    method: 'POST',
+    path: '/api/rag/documents/<id>/rename?workspaceId=<id>',
+    requiredScope: 'write',
+    description:
+      'Rename an indexed document\'s title. Metadata-only: versions stay immutable, so changing the text is a re-ingest, not a rename. Requires operator role or higher.',
+  },
+  {
+    action: 'rag.delete',
+    method: 'DELETE',
+    path: '/api/rag/documents/<id>?workspaceId=<id>',
+    requiredScope: 'delete',
+    description:
+      'Delete an indexed document and its derived versions, chunks, and embeddings. Destructive; requires owner or admin role.',
+  },
+  {
     action: 'keys.revoke',
     method: 'DELETE',
     path: '/api/keys/<keyId>',
@@ -283,9 +321,9 @@ export function capabilitiesForScopes(scopes: string[]): CapabilityDescriptor[] 
 
 /** Workspace role required for the operations exposed by the current inventory. */
 export function minimumRoleForCapability(action: string): 'member' | 'operator' | 'admin' {
-  if (action === 'files.delete') return 'admin';
+  if (action === 'files.delete' || action === 'rag.delete') return 'admin';
   if (
-    ['files.upload', 'files.publish', 'files.unpublish', 'files.archive', 'files.restore', 'jobs.enqueue', 'jobs.run', 'epistemic.record', 'graph.project'].includes(
+    ['files.upload', 'files.publish', 'files.unpublish', 'files.archive', 'files.restore', 'jobs.enqueue', 'jobs.run', 'epistemic.record', 'graph.project', 'rag.ingest', 'rag.rename'].includes(
       action
     )
   ) {

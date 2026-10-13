@@ -1567,6 +1567,103 @@ export async function dbMatchChunks(
   );
 }
 
+/** The workspace's document catalog, newest first, with version and chunk counts. */
+export async function dbListDocuments(
+  workspaceId: string
+): Promise<
+  Array<{ documentId: string; title: string; createdAt: string; versionCount: number; chunkCount: number }>
+> {
+  return query(
+    `SELECT d.id AS "documentId", d.title, d.created_at AS "createdAt",
+            COUNT(DISTINCT v.id)::int AS "versionCount",
+            COUNT(c.id)::int AS "chunkCount"
+     FROM octo.documents d
+     LEFT JOIN octo.document_versions v ON v.document_id = d.id
+     LEFT JOIN octo.chunks c ON c.document_version_id = v.id
+     WHERE d.workspace_id = $1
+     GROUP BY d.id, d.title, d.created_at
+     ORDER BY d.created_at DESC, d.title`,
+    [workspaceId]
+  );
+}
+
+/** One document with its immutable versions. Null when the workspace has no such document. */
+export async function dbGetDocument(
+  workspaceId: string,
+  documentId: string
+): Promise<{
+  documentId: string;
+  title: string;
+  createdAt: string;
+  versions: Array<{
+    versionId: string;
+    versionNumber: number;
+    contentHash: string;
+    mimeType: string;
+    byteSize: number | null;
+    extractionStatus: string;
+    createdAt: string;
+    chunkCount: number;
+  }>;
+} | null> {
+  const doc = await query<{ documentId: string; title: string; createdAt: string }>(
+    `SELECT id AS "documentId", title, created_at AS "createdAt"
+     FROM octo.documents WHERE workspace_id = $1 AND id = $2`,
+    [workspaceId, documentId]
+  );
+  if (!doc[0]) return null;
+
+  const versions = await query<{
+    versionId: string;
+    versionNumber: number;
+    contentHash: string;
+    mimeType: string;
+    byteSize: number | null;
+    extractionStatus: string;
+    createdAt: string;
+    chunkCount: number;
+  }>(
+    `SELECT v.id AS "versionId", v.version_number AS "versionNumber", v.content_hash AS "contentHash",
+            v.mime_type AS "mimeType", v.byte_size AS "byteSize", v.extraction_status AS "extractionStatus",
+            v.created_at AS "createdAt", COUNT(c.id)::int AS "chunkCount"
+     FROM octo.document_versions v
+     LEFT JOIN octo.chunks c ON c.document_version_id = v.id
+     WHERE v.workspace_id = $1 AND v.document_id = $2
+     GROUP BY v.id
+     ORDER BY v.version_number`,
+    [workspaceId, documentId]
+  );
+
+  return { ...doc[0], versions };
+}
+
+/** Renames a document's title. Null when the document is not in the workspace. */
+export async function dbRenameDocument(
+  workspaceId: string,
+  documentId: string,
+  title: string
+): Promise<{ documentId: string; title: string } | null> {
+  const rows = await query<{ documentId: string; title: string }>(
+    `UPDATE octo.documents SET title = $3
+     WHERE workspace_id = $1 AND id = $2
+     RETURNING id AS "documentId", title`,
+    [workspaceId, documentId, title]
+  );
+  return rows[0] ?? null;
+}
+
+/** Deletes a document; the cascade removes its versions, chunks, and embeddings. */
+export async function dbDeleteDocument(
+  workspaceId: string,
+  documentId: string
+): Promise<{ documentId: string } | null> {
+  const rows = await query<{ documentId: string }>(
+    `DELETE FROM octo.documents WHERE workspace_id = $1 AND id = $2 RETURNING id AS "documentId"`,
+    [workspaceId, documentId]
+  );
+  return rows[0] ?? null;
+}
+
 // 7. Epistemic ledger (Slice 9): append-only bitemporal claims, beliefs, evidence.
 //
 // Every helper here runs on the fenced app pool (`query`/`withTransaction`), so the
