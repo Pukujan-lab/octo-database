@@ -5,9 +5,14 @@
  * Stores cryptographically secure SHA-256 hashes; secrets are never stored in plaintext.
  */
 
-import { createHash, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Principal, WorkspaceRole } from '../types/auth';
+import { hashApiKeySecret } from '../lib/secret-hash';
+
+// The implementation lives in src/lib/secret-hash.ts so that leaf lib modules can
+// hash secrets without reaching up into src/api; re-exported here for compatibility.
+export { hashApiKeySecret };
 
 export interface ApiKey {
   id: string;
@@ -118,13 +123,6 @@ export function parseKeyScopes(
     if (!scopes.includes(scope)) scopes.push(scope);
   }
   return { ok: true, scopes };
-}
-
-/**
- * Computes a SHA-256 hash of a raw API key secret.
- */
-export function hashApiKeySecret(secret: string): string {
-  return createHash('sha256').update(secret).digest('hex');
 }
 
 /**

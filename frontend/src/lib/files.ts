@@ -1,32 +1,52 @@
-import { apiSend } from './api';
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "./api";
+import type { FileRecord } from "./types";
 
-// File transport shared by the Files view and the header upload control.
+export type UploadInput = {
+  workspaceId: string;
+  name: string;
+  mimeType: string;
+  data: string;
+  dataEncoding: "base64" | "utf8";
+};
 
-export async function uploadFile(workspaceId: string, file: File): Promise<void> {
-  const data = new Uint8Array(await file.arrayBuffer());
-  let binary = '';
-  for (let offset = 0; offset < data.length; offset += 0x8000) {
-    binary += String.fromCharCode(...Array.from(data.subarray(offset, offset + 0x8000)));
+/** Read a File as bytes and base64-encode it. Chunked so large files do not
+ *  blow the call stack of `String.fromCharCode.apply`. */
+export async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
   }
-  await apiSend('/api/files/upload', 'POST', {
-    workspaceId,
-    name: file.name,
-    mimeType: file.type || 'application/octet-stream',
-    data: btoa(binary),
-    dataEncoding: 'base64',
+  return btoa(binary);
+}
+
+export function useUploadFile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UploadInput) => api.post<FileRecord>("/api/files/upload", input),
+    onSuccess: (_file, input) => invalidateWorkspace(queryClient, input.workspaceId),
   });
 }
 
-export async function downloadFile(workspaceId: string, id: string, name: string): Promise<void> {
-  const blob = await fetch(`/api/files/content?workspaceId=${encodeURIComponent(workspaceId)}&fileId=${encodeURIComponent(id)}`, {
-    headers: { Authorization: `Bearer ${localStorage.getItem('octo_token') ?? ''}` },
-  }).then(async (response) => {
-    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? 'Download failed');
-    return response.blob();
-  });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = name;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+export function invalidateWorkspace(
+  queryClient: ReturnType<typeof useQueryClient>,
+  workspaceId: string,
+) {
+  for (const key of ["files", "gallery", "jobs", "activity", "shares", "ops-summary", "keys"]) {
+    queryClient.invalidateQueries({ queryKey: [key, workspaceId] });
+  }
+}
+
+export function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename || "download";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }

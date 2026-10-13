@@ -2,34 +2,35 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
-// The app is a same-origin client of the Octo API. In dev it runs on :3000 and
-// proxies the API and the MCP/OAuth routes to the Node service on :3001; in
-// production the Node service serves the built bundle from the repo-root dist.
+// The app is a same-origin client of the Octo API, served from the site root.
+// `base` stays default ("/") so asset URLs and the router basename line up; in
+// dev the server runs on :3000 (the port the Playwright e2e suite expects) and
+// proxies the API routes to the Node service on :3001.
 export default defineConfig(() => ({
   server: {
     host: "::",
     port: 3000,
     proxy: {
-      '/api': {
-        target: 'http://localhost:3001',
+      "/api": {
+        target: "http://localhost:3001",
         changeOrigin: true,
       },
-      '/health': {
-        target: 'http://localhost:3001',
+      "/health": {
+        target: "http://localhost:3001",
         changeOrigin: true,
       },
       // changeOrigin is off: the OAuth server derives its public origin (issuer,
       // redirect targets, the 401 metadata URL) from the Host header, and in dev
-      // the browser is talking to :3000. Rewriting Host to :3001 would bounce the
+      // the browser is talking to :8080. Rewriting Host to :3001 would bounce the
       // login redirect to the wrong origin.
-      '/mcp': {
-        target: 'http://localhost:3001',
+      "/mcp": {
+        target: "http://localhost:3001",
       },
-      '/oauth': {
-        target: 'http://localhost:3001',
+      "/oauth": {
+        target: "http://localhost:3001",
       },
-      '/.well-known': {
-        target: 'http://localhost:3001',
+      "/.well-known": {
+        target: "http://localhost:3001",
       },
     },
   },

@@ -136,10 +136,10 @@ runs 40+ specs at `workers: 1` and takes many minutes — prefer a targeted spec
 - **Schema drift shows up as a red dashboard banner, not a crash.** The local `octo`
   DB can lag the migrations. If the dashboard banner reads *"Could not load files,
   gallery"*, check the API log for a missing-column error. The newest migration is
-  `supabase/migrations/20261006160000_file_publish.sql` (adds `published_at`,
+  `db/migrations/20261006160000_file_publish.sql` (adds `published_at`,
   `public_key`); apply any missing one directly:
   ```bash
-  "/c/Program Files/PostgreSQL/17/bin/psql.exe" -h 127.0.0.1 -p 54329 -U postgres -d octo -v ON_ERROR_STOP=1 -f supabase/migrations/20261006160000_file_publish.sql
+  "/c/Program Files/PostgreSQL/17/bin/psql.exe" -h 127.0.0.1 -p 54329 -U postgres -d octo -v ON_ERROR_STOP=1 -f db/migrations/20261006160000_file_publish.sql
   ```
 - **`clickrole` strict-mode violations.** `Files` matches three buttons (nav item,
   `Upload files`, `View all files →`). Use `|exact`: `clickrole button Files |exact`.
