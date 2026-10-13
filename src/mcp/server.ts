@@ -236,6 +236,68 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
   );
 
   server.tool(
+    'list_documents',
+    'List the documents indexed in a workspace, newest first, each with its version and chunk counts. Read-only; requires the read scope.',
+    { workspaceId: z.string().describe('The workspace to list documents from') },
+    async ({ workspaceId }) => {
+      try {
+        return asText(await api.listDocuments(workspaceId));
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'get_document',
+    'Read one indexed document and its immutable versions, with each version\'s content hash, mime type, extraction status, and chunk count. Read-only; requires the read scope.',
+    {
+      workspaceId: z.string().describe('The workspace the document belongs to'),
+      documentId: z.string().describe('The document id (from list_documents)'),
+    },
+    async ({ workspaceId, documentId }) => {
+      try {
+        return asText(await api.getDocument({ workspaceId, documentId }));
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'rename_document',
+    'Rename an indexed document\'s title. Metadata-only: versions stay immutable, so to change the text re-ingest it (which adds a new version). The new title must be unique in the workspace. Requires the write scope and an operator or higher role.',
+    {
+      workspaceId: z.string().describe('The workspace the document belongs to'),
+      documentId: z.string().describe('The document id (from list_documents)'),
+      title: z.string().describe('The new title (unique per workspace)'),
+    },
+    async ({ workspaceId, documentId, title }) => {
+      try {
+        return asText(await api.renameDocument({ workspaceId, documentId, title }));
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'delete_document',
+    'Delete an indexed document and its derived versions, chunks, and embeddings. Destructive and irreversible: to re-index the text, ingest it again. Requires the delete scope and an owner or admin role.',
+    {
+      workspaceId: z.string().describe('The workspace the document belongs to'),
+      documentId: z.string().describe('The document id (from list_documents)'),
+    },
+    async ({ workspaceId, documentId }) => {
+      try {
+        return asText(await api.deleteDocument({ workspaceId, documentId }));
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
     'query_graph',
     'Run a read-only Cypher query against a workspace\'s graph. The graph is a rebuildable projection of the workspace\'s canonical data, and the query reaches only this workspace\'s graph — the graph name is derived server-side, so no argument can name another. Read-only; requires the read scope.',
     {
