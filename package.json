@@ -15,6 +15,7 @@
     "export-vectors": "tsx scripts/export-vectors.ts",
     "mcp": "tsx scripts/octo-mcp.ts",
     "typecheck": "tsc --noEmit",
+    "lint:imports": "depcruise src scripts --config .dependency-cruiser.cjs",
     "test": "vitest run"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.0",
+    "dependency-cruiser": "^18.6.0",
     "tsx": "^4.23.15",
     "typescript": "^5.7.0",
     "vite": "^8.3.1",

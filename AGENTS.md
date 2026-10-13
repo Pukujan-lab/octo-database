@@ -38,6 +38,20 @@ Before editing:
 
 GitHub issues own feature scope and lifecycle, but they remain subordinate to explicit owner direction and this anti-overengineering contract.
 
+## Repository shape
+
+Octo is a modular monolith organized by feature (vertical slice). `src/routes/<family>.ts` owns one HTTP route family end to end; `src/server/` holds the composition root, shared request plumbing, and the per-domain SQL stores; `src/<domain>/` holds slice services; `src/lib/` and `src/types/` are leaves.
+
+**The layer rule is machine-checked, not advisory.** `npm run lint:imports` (`dependency-cruiser`, config `.dependency-cruiser.cjs`) runs inside the required `gates` check and fails CI on any import that crosses a layer boundary the wrong direction. Run it before opening a PR.
+
+- New endpoint → `src/routes/<family>.ts`, plus one line in the `ROUTES` array in `src/server/index.ts`.
+- New SQL → `src/server/db/<domain>.ts`, re-exported from the `src/server/db.ts` barrel.
+- Never import `src/server/**` from outside `src/server/**` and `src/routes/**`; never import one route module from another; never import `db-core.ts` or a `db/<domain>.ts` store directly (use the `src/server/db` barrel); never construct a `pg` pool or an `AsyncLocalStorage` outside `src/server/db-core.ts`.
+- Do not add a web framework, a DI container, an ORM, or an event bus. The raw-`http` dispatch loop is the intended shape.
+- Fix a boundary violation by moving the code, not by widening a rule. Carve-outs in `.dependency-cruiser.cjs` require owner approval and must carry a `comment` naming their removal condition.
+
+Full rationale, the tree, and the two load-bearing invariants (the `index.ts` import order and the barrel mock seam): `docs/ARCHITECTURE.md`.
+
 ## Helper modules
 
 ACS, PCM, and CGM are helpers, not product authorities. Use them only to the extent they support the current workflow without adding delivery gates or scope. Their recommendations do not override the owner or this file.
