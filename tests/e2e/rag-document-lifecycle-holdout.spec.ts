@@ -63,7 +63,7 @@ async function ensureEmbeddingConfig(workspaceId: string): Promise<string> {
   const inserted = await queryService<{ id: string }>(
     `INSERT INTO octo.embedding_configs
        (workspace_id, model, model_version, dimensions, chunker, chunk_size, chunk_overlap)
-     VALUES ($1, 'text-embedding-3-small', 'v1', 1536, 'paragraph-aware', 800, 100)
+     VALUES ($1, 'text-embedding-3-small', 'v1', 1024, 'paragraph-aware', 800, 100)
      ON CONFLICT (workspace_id, model, model_version, chunker, chunk_size, chunk_overlap) DO NOTHING
      RETURNING id`,
     [workspaceId]
@@ -84,7 +84,7 @@ async function seedDocument(
   title: string
 ): Promise<{ documentId: string }> {
   const configId = await ensureEmbeddingConfig(workspaceId);
-  const zeroVector = `[${Array(1536).fill('0').join(',')}]`;
+  const zeroVector = `[${Array(1024).fill('0').join(',')}]`;
   const doc = await queryService<{ id: string }>(
     `INSERT INTO octo.documents (workspace_id, title, created_by) VALUES ($1, $2, $3) RETURNING id`,
     [workspaceId, title, createdBy]
