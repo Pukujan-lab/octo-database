@@ -16,24 +16,31 @@ export interface EmbeddingConfig {
   dimensions: number;
 }
 
-export const DEFAULT_EMBEDDING_DIMENSIONS = 1536;
+export const DEFAULT_EMBEDDING_DIMENSIONS = 1024;
 
 /**
  * Loads embedding provider configuration from the environment.
  * Returns null when unconfigured so callers can report a clear, non-fatal state.
  */
 export function loadEmbeddingConfigFromEnv(): EmbeddingConfig | null {
+  // A local provider (Ollama, llama.cpp, TEI) needs no credential, so naming either
+  // a key or a base URL counts as configured. Requiring a key would make the
+  // keyless local case indistinguishable from "no provider at all".
+  //
   // Deliberately separate from the chat/completions credentials: the configured
   // InferHub gateway exposes no embeddings endpoint, so borrowing its key would
   // silently fail at ingest time. Point these at any OpenAI-compatible embeddings
   // provider.
-  const apiKey = process.env['OCTO_EMBEDDING_API_KEY'];
-  if (!apiKey) return null;
+  const apiKey = process.env['OCTO_EMBEDDING_API_KEY'] ?? '';
+  const baseUrl = process.env['OCTO_EMBEDDING_BASE_URL'];
+  if (!apiKey && !baseUrl) return null;
 
   return {
     apiKey,
-    baseUrl: process.env['OCTO_EMBEDDING_BASE_URL'] ?? 'https://api.openai.com/v1',
-    model: process.env['OCTO_EMBEDDING_MODEL'] ?? 'text-embedding-3-small',
+    // host.docker.internal reaches the host from inside the container; a host-side
+    // run uses http://localhost:11434/v1 instead.
+    baseUrl: baseUrl ?? 'http://host.docker.internal:11434/v1',
+    model: process.env['OCTO_EMBEDDING_MODEL'] ?? 'qwen3-embedding:0.6b',
     dimensions: Number(process.env['OCTO_EMBEDDING_DIMENSIONS'] ?? DEFAULT_EMBEDDING_DIMENSIONS),
   };
 }
@@ -60,8 +67,9 @@ export async function embedTexts(
   const response = await fetch(`${config.baseUrl}/embeddings`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
+      // A keyless local provider ignores auth; an empty bearer is just noise.
+      ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
     },
     body: JSON.stringify({ model: config.model, input: texts }),
   });

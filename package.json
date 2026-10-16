@@ -13,6 +13,7 @@
     "backup": "tsx scripts/octo-backup.ts",
     "sync": "tsx scripts/octo-sync.ts",
     "export-vectors": "tsx scripts/export-vectors.ts",
+    "reembed": "tsx scripts/reembed-rag.ts",
     "mcp": "tsx scripts/octo-mcp.ts",
     "typecheck": "tsc --noEmit",
     "lint:imports": "depcruise src scripts --config .dependency-cruiser.cjs",

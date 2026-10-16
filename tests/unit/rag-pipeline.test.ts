@@ -18,7 +18,7 @@ import {
 const CONFIG: ChunkConfig = {
   model: 'text-embedding-3-small',
   modelVersion: '1',
-  dimensions: 1536,
+  dimensions: 1024,
   chunker: 'paragraph-aware',
   chunkSize: 200,
   chunkOverlap: 40,
@@ -107,8 +107,8 @@ describe('Extraction', () => {
 
 describe('Embeddings', () => {
   it('produces unit-length vectors of the configured size', () => {
-    const vector = deterministicEmbedding('retrieval augmented generation', 1536);
-    expect(vector.length).toBe(1536);
+    const vector = deterministicEmbedding('retrieval augmented generation', 1024);
+    expect(vector.length).toBe(1024);
     const norm = Math.sqrt(vector.reduce((s, v) => s + v * v, 0));
     expect(norm).toBeCloseTo(1, 5);
   });
