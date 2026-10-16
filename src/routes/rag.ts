@@ -58,7 +58,7 @@ export async function handleRagRoutes(
     const embeddingConfig = loadEmbeddingConfigFromEnv();
     if (!embeddingConfig) {
       sendJson(res, 503, {
-        error: 'EMBEDDING_PROVIDER_NOT_CONFIGURED: set OCTO_EMBEDDING_API_KEY to ingest documents',
+        error: 'EMBEDDING_PROVIDER_NOT_CONFIGURED: set OCTO_EMBEDDING_BASE_URL and OCTO_EMBEDDING_MODEL to ingest documents',
       });
       return true;
     }
@@ -174,7 +174,7 @@ export async function handleRagRoutes(
     const embeddingConfig = loadEmbeddingConfigFromEnv();
     if (!embeddingConfig) {
       sendJson(res, 503, {
-        error: 'EMBEDDING_PROVIDER_NOT_CONFIGURED: set OCTO_EMBEDDING_API_KEY to query documents',
+        error: 'EMBEDDING_PROVIDER_NOT_CONFIGURED: set OCTO_EMBEDDING_BASE_URL and OCTO_EMBEDDING_MODEL to query documents',
       });
       return true;
     }
