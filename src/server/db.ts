@@ -401,7 +401,7 @@ export async function dbInsertFile(
   const sql = `
     INSERT INTO octo.files (id, workspace_id, created_by, name, mime_type, size_bytes, provider, storage_key, status, content_hash)
     VALUES ($1, $2, $3, $4, $5, $6, 'r2', $7, 'active', $8)
-    RETURNING id, name, size_bytes AS "sizeBytes", mime_type AS "mimeType", storage_key AS "storageKey";
+    RETURNING id, name, size_bytes::double precision AS "sizeBytes", mime_type AS "mimeType", storage_key AS "storageKey";
   `;
   const rows = await query<{ id: string; name: string; sizeBytes: number; mimeType: string; storageKey: string }>(
     sql,
@@ -423,7 +423,7 @@ export async function dbListWorkspaceFiles(workspaceId: string): Promise<
   }[]
 > {
   const sql = `
-    SELECT id, name, size_bytes AS "sizeBytes", mime_type AS "mimeType",
+    SELECT id, name, size_bytes::double precision AS "sizeBytes", mime_type AS "mimeType",
            storage_key AS "storageKey", created_at AS "createdAt",
            archive_state AS "archiveState", published_at AS "publishedAt"
     FROM octo.files
@@ -449,7 +449,7 @@ export async function dbGetFile(
   publicKey: string | null;
 } | null> {
   const sql = `
-    SELECT id, name, storage_key AS "storageKey", size_bytes AS "sizeBytes",
+    SELECT id, name, storage_key AS "storageKey", size_bytes::double precision AS "sizeBytes",
            mime_type AS "mimeType", archive_state AS "archiveState",
            archive_locator AS "archiveLocator", archive_hash AS "archiveHash",
            published_at AS "publishedAt", public_key AS "publicKey"
