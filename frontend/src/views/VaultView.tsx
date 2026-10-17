@@ -172,6 +172,7 @@ export function VaultView({
 
   async function reload() {
     await Promise.all([itemsQuery.refetch(), grantsQuery.refetch(), leasesQuery.refetch()]);
+    await queryClient.invalidateQueries({ queryKey: ["vault-routes"] });
   }
 
   return (
@@ -283,7 +284,9 @@ export function VaultView({
             onClick={async () => {
               try {
                 const result = await api.post<{ purged: number }>("/api/vault/health", gateBody());
-                toast.success(result.purged ? `Checked keys. Removed ${result.purged} stale.` : "Checked keys.");
+                toast.success(
+                  result.purged ? `Checked keys and routes. Removed ${result.purged} stale.` : "Checked keys and routes."
+                );
                 afterGate();
                 void reload();
               } catch (error) {
