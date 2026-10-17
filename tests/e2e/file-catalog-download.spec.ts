@@ -19,6 +19,7 @@ test('uploads an arbitrary file and downloads identical bytes from the catalog',
     await page.locator('[data-testid="file-upload"]').setInputFiles(sourcePath);
     const fileRow = page.getByRole('row').filter({ hasText: fileName });
     await expect(fileRow).toBeVisible();
+    await expect(fileRow.getByText(`${sourceBytes.byteLength} B`, { exact: true })).toBeVisible();
 
     const downloadPromise = page.waitForEvent('download');
     await fileRow.getByRole('button', { name: 'Download' }).click();
