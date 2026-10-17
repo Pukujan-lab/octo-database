@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 
 MIGRATION_PATH = (
-    Path(__file__).parent.parent / "db" / "migrations" / "20261017200000_vault_routes_and_leases.sql"
+    Path(__file__).parent.parent
+    / "db"
+    / "migrations"
+    / "20261017200000_vault_routes_and_leases.sql"
 )
 
 
@@ -65,14 +68,16 @@ class VaultRouteSchemaTests(unittest.TestCase):
 
     def test_consume_function_joins_the_route(self) -> None:
         self.assertIn(
-            "CREATE OR REPLACE FUNCTION octo.consume_vault_lease(target_hash TEXT, target_route_key TEXT)",
+            "CREATE OR REPLACE FUNCTION octo.consume_vault_lease("
+            "target_hash TEXT, target_route_key TEXT)",
             self.sql,
         )
         self.assertIn("LANGUAGE plpgsql SECURITY DEFINER", self.sql)
         self.assertIn("AND l.revoked_at IS NULL", self.sql)
         self.assertIn("AND l.expires_at > now()", self.sql)
         self.assertIn(
-            "GRANT EXECUTE ON FUNCTION octo.consume_vault_lease(TEXT, TEXT) TO anon, authenticated;",
+            "GRANT EXECUTE ON FUNCTION octo.consume_vault_lease(TEXT, TEXT) "
+            "TO anon, authenticated;",
             self.sql,
         )
 
