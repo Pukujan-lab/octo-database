@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildRouteProbe, checkVaultItem, type HealthProbe } from '../../src/lib/vault-health';
+import {
+  buildRouteProbe,
+  checkVaultItem,
+  classifyRouteProbe,
+  type HealthProbe,
+} from '../../src/lib/vault-health';
 import { UNCHECKED_STALE_MS } from '../../src/lib/vault-policy';
 
 const NOW = Date.parse('2026-10-16T12:00:00Z');
@@ -118,5 +123,21 @@ describe('route health probe', () => {
   it('never puts the working key in the probe', () => {
     const request = buildRouteProbe(ROUTE, 'real-secret');
     expect(JSON.stringify(request)).not.toContain('octo_tmp_');
+  });
+});
+
+describe('route probe verdict', () => {
+  it('counts a 404 at the base URL as reachable', () => {
+    expect(classifyRouteProbe(404).status).toBe('ok');
+  });
+
+  it('flags a rejected key', () => {
+    expect(classifyRouteProbe(401).status).toBe('unauthorized');
+    expect(classifyRouteProbe(403).status).toBe('forbidden_group');
+  });
+
+  it('flags a vendor that is down or silent', () => {
+    expect(classifyRouteProbe(503).status).toBe('unreachable');
+    expect(classifyRouteProbe('error').status).toBe('unreachable');
   });
 });

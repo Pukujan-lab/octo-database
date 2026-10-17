@@ -11,8 +11,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { getPublicOrigin } from '../lib/public-origin';
 import { hashApiKeySecret } from '../lib/secret-hash';
 import { decryptSecret, encryptSecret } from '../lib/mfa';
-import { classifyUpstream } from '../lib/relay-egress';
-import { buildRouteProbe, checkVaultItem } from '../lib/vault-health';
+import { buildRouteProbe, checkVaultItem, classifyRouteProbe } from '../lib/vault-health';
 import {
   BULK_MAX_LINES,
   grantExpiresAt,
@@ -548,7 +547,7 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
         // A body_json route only proves itself when a caller sends a body.
         if (!request) continue;
         const status = await liveProbe(request.url, request.headers, 'GET');
-        const health = classifyUpstream(status);
+        const health = classifyRouteProbe(status);
         await dbUpdateVaultRouteHealth(auth.principal.id, route.id, health.status, health.detail);
         checkedRoutes.push({
           id: route.id,
