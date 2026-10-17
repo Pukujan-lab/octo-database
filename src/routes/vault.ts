@@ -15,6 +15,7 @@ import { buildRouteProbe, checkVaultItem, classifyRouteProbe } from '../lib/vaul
 import {
   BULK_MAX_LINES,
   grantExpiresAt,
+  inferVaultGroup,
   leaseExpiresAt,
   parseBulkVaultLine,
   parseGrantHours,
@@ -24,7 +25,6 @@ import {
   presentVaultItem,
   routeKeySlug,
   STALE_PURGE_MS,
-  VAULT_KINDS,
   type VaultItemInput,
   type VaultKind,
 } from '../lib/vault-policy';
@@ -100,6 +100,8 @@ function publicItem(row: VaultItemRow) {
     label: row.label,
     description: row.description,
     kind: row.kind,
+    kindSource: row.kindSource,
+    group: inferVaultGroup(row.label),
     username: row.username,
     url: row.url,
     urlKind: row.urlKind,
@@ -260,11 +262,8 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
         sendJson(res, 400, { error: `BULK_TOO_LARGE: at most ${BULK_MAX_LINES} lines per paste.` });
         return true;
       }
-      const kindRaw = typeof body['kind'] === 'string' ? body['kind'] : 'token';
-      if (!VAULT_KINDS.includes(kindRaw as VaultKind)) {
-        sendJson(res, 400, { error: 'KIND_INVALID: kind must be login, token, url, or note.' });
-        return true;
-      }
+      // The kind is per line now: a `kind:` prefix overrides, otherwise the
+      // label infers it. The batch-wide selector is gone.
       const workspaceId = body['workspaceId'];
       const scope = workspaceId === undefined || workspaceId === null || workspaceId === '' ? null : String(workspaceId);
       if (!(await workspaceAllowed(res, auth.principal.id, scope))) return true;
@@ -273,7 +272,7 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
       // consumes the one-time code.
       const parsed: VaultItemInput[] = [];
       for (let index = 0; index < lines.length; index += 1) {
-        const item = parseBulkVaultLine(lines[index]!, kindRaw as VaultKind, scope);
+        const item = parseBulkVaultLine(lines[index]!, null, scope);
         if (!item.ok) {
           sendJson(res, 400, { error: `Line ${index + 1}: ${item.error.replace('BULK_LINE: ', '')}` });
           return true;
@@ -291,6 +290,7 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
           label: item.label,
           description: item.description,
           kind: item.kind,
+          kindSource: item.kindSource,
           username: item.username,
           url: item.url,
           urlKind: item.urlKind,
@@ -508,6 +508,10 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
       const items = await dbListVaultItems(auth.principal.id);
       const checked: Array<{ id: string; healthStatus: string; healthDetail: string }> = [];
       for (const item of items) {
+        // A kind inferred from a label is not evidence the value can be
+        // probed. Skipping inferred rows keeps a 404 on a backfilled base URL
+        // from marking a live key stale (and eventually purging it).
+        if (item.kindSource === 'inferred') continue;
         const secret = openSeal(item.secretEncrypted);
         const verdict = await checkVaultItem(
           {
