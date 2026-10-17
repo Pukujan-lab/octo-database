@@ -80,7 +80,8 @@ test.describe('Scoped Share Links', () => {
     // --- Owner revokes; the recipient's access dies immediately ---
     await page.getByRole('button', { name: /^Actions for share / }).click();
     await page.getByRole('menuitem', { name: 'Revoke' }).click();
-    await expect(page.getByText('Revoked')).toBeVisible();
+    // Scoped to the share row: the "Share link revoked" toast also contains the word.
+    await expect(page.getByTestId('view-access').getByText('Revoked', { exact: true })).toBeVisible();
 
     const afterRevoke = await recipientPage.request.get(`/api/public/shares/${token}`);
     expect(afterRevoke.status()).toBe(404);
