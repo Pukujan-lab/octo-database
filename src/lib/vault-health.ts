@@ -94,6 +94,19 @@ function ageOut(verdict: HealthVerdict, createdAtMs: number, now: number): Healt
   return verdict;
 }
 
+/**
+ * A base-URL probe can only prove the host answered: most vendor roots have no
+ * handler and 404. 401/403 still mean the key is bad, and a 5xx or a network
+ * failure means the vendor is not usable.
+ */
+export function classifyRouteProbe(status: number | 'error'): { status: string; detail: string } {
+  if (status === 'error') return { status: 'unreachable', detail: 'host did not answer' };
+  if (status === 401) return { status: 'unauthorized', detail: 'upstream rejected the key (401)' };
+  if (status === 403) return { status: 'forbidden_group', detail: 'key valid but not entitled (403)' };
+  if (status >= 500) return { status: 'unreachable', detail: `upstream ${status}` };
+  return { status: 'ok', detail: `host answered ${status}` };
+}
+
 const PROBE_TEMP_KEY = 'octo_tmp_probe';
 
 /**
