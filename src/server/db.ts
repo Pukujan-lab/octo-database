@@ -2575,6 +2575,7 @@ export interface VaultItemRow {
   kind: 'login' | 'token' | 'url' | 'note';
   username: string | null;
   url: string | null;
+  urlKind: string | null;
   secretEncrypted: string | null;
   notesEncrypted: string | null;
   healthStatus: 'unchecked' | 'healthy' | 'weak' | 'stale';
@@ -2606,6 +2607,7 @@ const VAULT_ITEM_COLUMNS = `
   kind,
   username,
   url,
+  url_kind AS "urlKind",
   secret_encrypted AS "secretEncrypted",
   notes_encrypted AS "notesEncrypted",
   health_status AS "healthStatus",
@@ -2645,13 +2647,14 @@ export async function dbInsertVaultItem(input: {
   kind: string;
   username: string | null;
   url: string | null;
+  urlKind: string | null;
   secretEncrypted: string | null;
   notesEncrypted: string | null;
 }): Promise<void> {
   await query(
     `INSERT INTO octo.vault_items (
-       id, principal_id, workspace_id, label, description, kind, username, url, secret_encrypted, notes_encrypted
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+       id, principal_id, workspace_id, label, description, kind, username, url, url_kind, secret_encrypted, notes_encrypted
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [
       input.id,
       input.principalId,
@@ -2661,6 +2664,7 @@ export async function dbInsertVaultItem(input: {
       input.kind,
       input.username,
       input.url,
+      input.urlKind,
       input.secretEncrypted,
       input.notesEncrypted,
     ]
@@ -2676,6 +2680,7 @@ export async function dbInsertVaultItemsBulk(
     kind: string;
     username: string | null;
     url: string | null;
+    urlKind: string | null;
     secretEncrypted: string | null;
     notesEncrypted: string | null;
   }>
@@ -2684,8 +2689,8 @@ export async function dbInsertVaultItemsBulk(
     for (const item of items) {
       await client.query(
         `INSERT INTO octo.vault_items (
-           id, principal_id, workspace_id, label, description, kind, username, url, secret_encrypted, notes_encrypted
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+           id, principal_id, workspace_id, label, description, kind, username, url, url_kind, secret_encrypted, notes_encrypted
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           randomUUID(),
           principalId,
@@ -2695,6 +2700,7 @@ export async function dbInsertVaultItemsBulk(
           item.kind,
           item.username,
           item.url,
+          item.urlKind,
           item.secretEncrypted,
           item.notesEncrypted,
         ]
@@ -2871,4 +2877,262 @@ export async function dbListVaultItemsForGrant(
      ORDER BY label ASC`,
     [principalId, workspaceId]
   );
+}
+
+// --- Vault credential routes -------------------------------------------------
+
+export interface VaultRouteRow {
+  id: string;
+  itemId: string;
+  routeKey: string;
+  name: string;
+  baseUrl: string;
+  authScheme: string;
+  authHeader: string | null;
+  bodyField: string | null;
+  basicUsername: string | null;
+  healthStatus: string;
+  healthDetail: string | null;
+  lastHealthAt: string | null;
+  createdAt: string;
+}
+
+const VAULT_ROUTE_COLUMNS = `
+  id,
+  item_id AS "itemId",
+  route_key AS "routeKey",
+  name,
+  base_url AS "baseUrl",
+  auth_scheme AS "authScheme",
+  auth_header AS "authHeader",
+  body_field AS "bodyField",
+  basic_username AS "basicUsername",
+  health_status AS "healthStatus",
+  health_detail AS "healthDetail",
+  last_health_at AS "lastHealthAt",
+  created_at AS "createdAt"
+`;
+
+export async function dbListVaultRoutes(principalId: string, itemId: string): Promise<VaultRouteRow[]> {
+  return query<VaultRouteRow>(
+    `SELECT ${VAULT_ROUTE_COLUMNS}
+     FROM octo.vault_routes
+     WHERE principal_id = $1 AND item_id = $2
+     ORDER BY created_at ASC`,
+    [principalId, itemId]
+  );
+}
+
+export async function dbGetVaultRoute(principalId: string, routeId: string): Promise<VaultRouteRow | null> {
+  const rows = await query<VaultRouteRow>(
+    `SELECT ${VAULT_ROUTE_COLUMNS}
+     FROM octo.vault_routes
+     WHERE principal_id = $1 AND id = $2`,
+    [principalId, routeId]
+  );
+  return rows[0] ?? null;
+}
+
+export async function dbInsertVaultRoute(input: {
+  id: string;
+  principalId: string;
+  itemId: string;
+  routeKey: string;
+  name: string;
+  baseUrl: string;
+  authScheme: string;
+  authHeader: string | null;
+  bodyField: string | null;
+  basicUsername: string | null;
+}): Promise<void> {
+  await query(
+    `INSERT INTO octo.vault_routes (
+       id, principal_id, item_id, route_key, name, base_url, auth_scheme, auth_header, body_field, basic_username
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      input.id,
+      input.principalId,
+      input.itemId,
+      input.routeKey,
+      input.name,
+      input.baseUrl,
+      input.authScheme,
+      input.authHeader,
+      input.bodyField,
+      input.basicUsername,
+    ]
+  );
+}
+
+export async function dbDeleteVaultRoute(principalId: string, itemId: string, routeId: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    'DELETE FROM octo.vault_routes WHERE principal_id = $1 AND item_id = $2 AND id = $3 RETURNING id',
+    [principalId, itemId, routeId]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Writes the health of one route. Service path: the relay calls this with no
+ * session, and the health pass passes the owner's principal explicitly.
+ */
+export async function dbUpdateVaultRouteHealth(
+  principalId: string,
+  routeId: string,
+  status: string,
+  detail: string | null
+): Promise<void> {
+  await queryService(
+    `UPDATE octo.vault_routes
+     SET health_status = $3,
+         health_detail = $4,
+         last_health_at = now(),
+         updated_at = now()
+     WHERE principal_id = $1 AND id = $2`,
+    [principalId, routeId, status, detail]
+  );
+}
+
+/** Routes of one item, for the grant-facing cabinet and the mint response. */
+export async function dbListVaultRoutesForGrant(itemId: string): Promise<VaultRouteRow[]> {
+  return queryService<VaultRouteRow>(
+    `SELECT ${VAULT_ROUTE_COLUMNS}
+     FROM octo.vault_routes
+     WHERE item_id = $1
+     ORDER BY created_at ASC`,
+    [itemId]
+  );
+}
+
+// --- Vault leases (temp working keys) ---------------------------------------
+
+export interface VaultLeaseRow {
+  id: string;
+  itemId: string;
+  itemLabel: string;
+  parentGrantId: string;
+  prefix: string;
+  name: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export async function dbListVaultLeases(principalId: string): Promise<VaultLeaseRow[]> {
+  return query<VaultLeaseRow>(
+    `SELECT l.id,
+            l.item_id AS "itemId",
+            i.label AS "itemLabel",
+            l.parent_grant_id AS "parentGrantId",
+            l.prefix,
+            l.name,
+            l.expires_at AS "expiresAt",
+            l.revoked_at AS "revokedAt",
+            l.created_at AS "createdAt",
+            l.last_used_at AS "lastUsedAt"
+     FROM octo.vault_leases l
+     JOIN octo.vault_items i ON i.id = l.item_id
+     WHERE l.principal_id = $1
+     ORDER BY l.created_at DESC`,
+    [principalId]
+  );
+}
+
+export async function dbRevokeVaultLease(principalId: string, leaseId: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    `UPDATE octo.vault_leases
+     SET revoked_at = now()
+     WHERE principal_id = $1 AND id = $2 AND revoked_at IS NULL
+     RETURNING id`,
+    [principalId, leaseId]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Mints a lease for a grant. The agent has no session, so this runs on the
+ * service pool. An active lease for the same (grant, item) is rotated out in
+ * the same transaction, which the partial unique index also enforces.
+ */
+export async function dbInsertVaultLeaseService(input: {
+  id: string;
+  principalId: string;
+  itemId: string;
+  parentGrantId: string;
+  keyHash: string;
+  prefix: string;
+  name: string;
+  expiresAt: string;
+}): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE octo.vault_leases
+       SET revoked_at = now()
+       WHERE parent_grant_id = $1 AND item_id = $2 AND revoked_at IS NULL`,
+      [input.parentGrantId, input.itemId]
+    );
+    await client.query(
+      `INSERT INTO octo.vault_leases (
+         id, principal_id, item_id, parent_grant_id, key_hash, prefix, name, expires_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        input.id,
+        input.principalId,
+        input.itemId,
+        input.parentGrantId,
+        input.keyHash,
+        input.prefix,
+        input.name,
+        input.expiresAt,
+      ]
+    );
+  }, servicePool);
+}
+
+/** Extends a live lease. Returns the new expiry, or null when it is gone. */
+export async function dbRenewVaultLease(keyHash: string, days: number): Promise<string | null> {
+  const rows = await queryService<{ expiresAt: string }>(
+    `UPDATE octo.vault_leases
+     SET expires_at = now() + make_interval(days => $2)
+     WHERE key_hash = $1 AND revoked_at IS NULL AND expires_at > now()
+     RETURNING expires_at AS "expiresAt"`,
+    [keyHash, days]
+  );
+  return rows[0]?.expiresAt ?? null;
+}
+
+export interface ConsumedVaultLease {
+  leaseId: string;
+  principalId: string;
+  itemId: string;
+  routeId: string;
+  baseUrl: string;
+  authScheme: string;
+  authHeader: string | null;
+  bodyField: string | null;
+  basicUsername: string | null;
+  itemUsername: string | null;
+  secretEncrypted: string | null;
+  expiresAt: string;
+}
+
+export async function dbConsumeVaultLease(keyHash: string, routeKey: string): Promise<ConsumedVaultLease | null> {
+  const rows = await queryService<ConsumedVaultLease>(
+    `SELECT lease_id AS "leaseId",
+            principal_id AS "principalId",
+            item_id AS "itemId",
+            route_id AS "routeId",
+            base_url AS "baseUrl",
+            auth_scheme AS "authScheme",
+            auth_header AS "authHeader",
+            body_field AS "bodyField",
+            basic_username AS "basicUsername",
+            item_username AS "itemUsername",
+            secret_encrypted AS "secretEncrypted",
+            expires_at AS "expiresAt"
+     FROM octo.consume_vault_lease($1, $2)`,
+    [keyHash, routeKey]
+  );
+  return rows[0] ?? null;
 }

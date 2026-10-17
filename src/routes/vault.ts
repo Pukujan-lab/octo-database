@@ -17,7 +17,9 @@ import {
   parseBulkVaultLine,
   parseGrantHours,
   parseVaultItem,
+  parseVaultRoute,
   presentVaultItem,
+  routeKeySlug,
   STALE_PURGE_MS,
   VAULT_KINDS,
   type VaultItemInput,
@@ -29,18 +31,23 @@ import {
   dbConsumeVaultGrant,
   dbDeleteVaultGrant,
   dbDeleteVaultItem,
+  dbDeleteVaultRoute,
   dbGetVaultItem,
+  dbGetVaultRoute,
   dbGetWorkspaceMembership,
   dbInsertVaultGrant,
   dbInsertVaultGrantService,
   dbInsertVaultItem,
   dbInsertVaultItemsBulk,
+  dbInsertVaultRoute,
   dbListVaultGrants,
   dbListVaultItems,
   dbListVaultItemsForGrant,
+  dbListVaultRoutes,
   dbPurgeStaleVaultItems,
   dbUpdateVaultHealth,
   type VaultItemRow,
+  type VaultRouteRow,
 } from '../server/db';
 import { readJsonObject, requireUuid, sendJson, type RouteHandler } from '../server/http';
 import { UUID_PATTERN } from '../server/runtime';
@@ -84,6 +91,7 @@ function publicItem(row: VaultItemRow) {
     kind: row.kind,
     username: row.username,
     url: row.url,
+    urlKind: row.urlKind,
     hasSecret: Boolean(row.secretEncrypted),
     hasNotes: Boolean(row.notesEncrypted),
     healthStatus: row.healthStatus,
@@ -92,6 +100,24 @@ function publicItem(row: VaultItemRow) {
     staleSince: row.staleSince,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function publicRoute(row: VaultRouteRow) {
+  return {
+    id: row.id,
+    itemId: row.itemId,
+    routeKey: row.routeKey,
+    name: row.name,
+    baseUrl: row.baseUrl,
+    authScheme: row.authScheme,
+    authHeader: row.authHeader,
+    bodyField: row.bodyField,
+    basicUsername: row.basicUsername,
+    healthStatus: row.healthStatus,
+    healthDetail: row.healthDetail,
+    lastHealthAt: row.lastHealthAt,
+    createdAt: row.createdAt,
   };
 }
 
@@ -181,6 +207,7 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
         kind: parsed.value.kind,
         username: parsed.value.username,
         url: parsed.value.url,
+        urlKind: parsed.value.urlKind,
         secretEncrypted: seal(parsed.value.secret),
         notesEncrypted: seal(parsed.value.notes),
       });
@@ -238,11 +265,91 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
           kind: item.kind,
           username: item.username,
           url: item.url,
+          urlKind: item.urlKind,
           secretEncrypted: seal(item.secret),
           notesEncrypted: seal(item.notes),
         }))
       );
       sendJson(res, 201, { inserted: parsed.length });
+      return true;
+    }
+
+    const routeMatch = path.match(/^\/api\/vault\/items\/([^/]+)\/routes$/);
+    if (routeMatch) {
+      const itemId = routeMatch[1] ?? '';
+      if (!requireUuid(res, itemId, 'itemId')) return true;
+
+      if (req.method === 'GET') {
+        const routes = await dbListVaultRoutes(auth.principal.id, itemId);
+        sendJson(res, 200, { routes: routes.map(publicRoute) });
+        return true;
+      }
+
+      if (req.method === 'POST') {
+        const body = await readJsonObject(req);
+        if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+          return true;
+        }
+        const item = await dbGetVaultItem(auth.principal.id, itemId);
+        if (!item) {
+          sendJson(res, 404, { error: 'NOT_FOUND: no vault item with that id.' });
+          return true;
+        }
+        if ((item.kind !== 'token' && item.kind !== 'login') || !item.secretEncrypted) {
+          sendJson(res, 400, {
+            error: 'ROUTE_ITEM_INVALID: only a token or login with a stored secret can have a route.',
+          });
+          return true;
+        }
+        const parsed = parseVaultRoute(body);
+        if (!parsed.ok) {
+          sendJson(res, 400, { error: parsed.error });
+          return true;
+        }
+        const routeKey = parsed.value.routeKey ?? `${routeKeySlug(parsed.value.name)}-${randomBytes(3).toString('hex')}`;
+        const id = randomUUID();
+        try {
+          await dbInsertVaultRoute({
+            id,
+            principalId: auth.principal.id,
+            itemId,
+            routeKey,
+            name: parsed.value.name,
+            baseUrl: parsed.value.baseUrl,
+            authScheme: parsed.value.authScheme,
+            authHeader: parsed.value.authHeader,
+            bodyField: parsed.value.bodyField,
+            basicUsername: parsed.value.basicUsername,
+          });
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('vault_routes_route_key_key')) {
+            sendJson(res, 409, { error: 'ROUTE_KEY_TAKEN: that routeKey is already used by another route.' });
+            return true;
+          }
+          throw error;
+        }
+        const created = await dbGetVaultRoute(auth.principal.id, id);
+        sendJson(res, 201, { route: created ? publicRoute(created) : { id, routeKey } });
+        return true;
+      }
+    }
+
+    const routeDeleteMatch = path.match(/^\/api\/vault\/items\/([^/]+)\/routes\/([^/]+)$/);
+    if (routeDeleteMatch && req.method === 'DELETE') {
+      const itemId = routeDeleteMatch[1] ?? '';
+      const routeId = routeDeleteMatch[2] ?? '';
+      if (!requireUuid(res, itemId, 'itemId')) return true;
+      if (!requireUuid(res, routeId, 'routeId')) return true;
+      const body = await readJsonObject(req);
+      if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+        return true;
+      }
+      const removed = await dbDeleteVaultRoute(auth.principal.id, itemId, routeId);
+      if (!removed) {
+        sendJson(res, 404, { error: 'NOT_FOUND: no route with that id on that item.' });
+        return true;
+      }
+      sendJson(res, 200, { deleted: routeId });
       return true;
     }
 
