@@ -20,6 +20,10 @@ export const CONFIRM_SECRET_NOT_SET = "CONFIRM_SECRET_NOT_SET";
 const FRIENDLY: Record<string, string> = {
   TURNSTILE_FAILED: "Human verification failed. Complete the challenge and try again.",
   CONFIRM_SECRET_NOT_SET: "Set a confirmation secret first — it gates destructive actions.",
+  CONFIRM_CODE_INVALID: "That code did not match, or it was already used. Type the new code shown.",
+  CONFIRM_SECRET_INVALID: "That confirmation secret does not match.",
+  BULK_LINES: "Paste at least one LABEL=secret line.",
+  BULK_TOO_LARGE: "That paste is too long — split it into smaller batches.",
   ACCOUNT_KEY_EXISTS: "An account-wide key already exists for this account.",
   SLUG_TAKEN: "That workspace slug is already taken.",
   WORKSPACE_DAILY_LIMIT: "This account has used its workspace allowance for today.",
