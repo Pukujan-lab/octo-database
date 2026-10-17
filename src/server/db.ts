@@ -2573,6 +2573,7 @@ export interface VaultItemRow {
   label: string;
   description: string;
   kind: 'login' | 'token' | 'url' | 'note';
+  kindSource: 'explicit' | 'inferred';
   username: string | null;
   url: string | null;
   urlKind: string | null;
@@ -2605,6 +2606,7 @@ const VAULT_ITEM_COLUMNS = `
   label,
   description,
   kind,
+  kind_source AS "kindSource",
   username,
   url,
   url_kind AS "urlKind",
@@ -2645,6 +2647,7 @@ export async function dbInsertVaultItem(input: {
   label: string;
   description: string;
   kind: string;
+  kindSource?: 'explicit' | 'inferred';
   username: string | null;
   url: string | null;
   urlKind: string | null;
@@ -2653,8 +2656,8 @@ export async function dbInsertVaultItem(input: {
 }): Promise<void> {
   await query(
     `INSERT INTO octo.vault_items (
-       id, principal_id, workspace_id, label, description, kind, username, url, url_kind, secret_encrypted, notes_encrypted
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+       id, principal_id, workspace_id, label, description, kind, kind_source, username, url, url_kind, secret_encrypted, notes_encrypted
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [
       input.id,
       input.principalId,
@@ -2662,6 +2665,7 @@ export async function dbInsertVaultItem(input: {
       input.label,
       input.description,
       input.kind,
+      input.kindSource ?? 'explicit',
       input.username,
       input.url,
       input.urlKind,
@@ -2678,6 +2682,7 @@ export async function dbInsertVaultItemsBulk(
     label: string;
     description: string;
     kind: string;
+    kindSource?: 'explicit' | 'inferred';
     username: string | null;
     url: string | null;
     urlKind: string | null;
@@ -2689,8 +2694,8 @@ export async function dbInsertVaultItemsBulk(
     for (const item of items) {
       await client.query(
         `INSERT INTO octo.vault_items (
-           id, principal_id, workspace_id, label, description, kind, username, url, url_kind, secret_encrypted, notes_encrypted
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+           id, principal_id, workspace_id, label, description, kind, kind_source, username, url, url_kind, secret_encrypted, notes_encrypted
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           randomUUID(),
           principalId,
@@ -2698,6 +2703,7 @@ export async function dbInsertVaultItemsBulk(
           item.label,
           item.description,
           item.kind,
+          item.kindSource ?? 'explicit',
           item.username,
           item.url,
           item.urlKind,

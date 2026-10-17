@@ -75,6 +75,47 @@ test.describe('vault bulk import', () => {
     expect(await labels(request, session.sessionToken)).toEqual([]);
   });
 
+  test('the paste infers each line kind and the health pass leaves inferred rows alone', async ({ request }) => {
+    const session = await createGuest(request);
+    const suffix = randomUUID().slice(0, 8);
+    const urlLabel = `SOME_${suffix}_API_URL`;
+    const keyLabel = `SOME_${suffix}_API_KEY`;
+    const modelLabel = `SOME_${suffix}_MODEL`;
+
+    const created = await request.post('/api/vault/items/bulk', {
+      headers: bearer(session.sessionToken),
+      data: {
+        lines: [
+          `${urlLabel}=https://api.example.com/v1`,
+          `${keyLabel}=sk-secret`,
+          `${modelLabel}=gpt-5`,
+        ],
+        confirmSecret: CONFIRM_SECRET,
+      },
+    });
+    expect(created.status()).toBe(201);
+
+    const health = await request.post('/api/vault/health', {
+      headers: bearer(session.sessionToken),
+      data: { confirmSecret: CONFIRM_SECRET },
+    });
+    expect(health.status()).toBe(200);
+    expect(((await health.json()) as { purged: number }).purged).toBe(0);
+
+    const response = await request.get('/api/vault/items', { headers: bearer(session.sessionToken) });
+    const items = ((await response.json()) as {
+      items: Array<{ label: string; kind: string; url: string | null; healthStatus: string }>;
+    }).items;
+    const byLabel = new Map(items.map((item) => [item.label, item]));
+    expect(byLabel.get(urlLabel)).toMatchObject({
+      kind: 'url',
+      url: 'https://api.example.com/v1',
+      healthStatus: 'unchecked',
+    });
+    expect(byLabel.get(keyLabel)?.kind).toBe('token');
+    expect(byLabel.get(modelLabel)?.kind).toBe('note');
+  });
+
   test('a paste over the line cap is refused', async ({ request }) => {
     const session = await createGuest(request);
     const lines = Array.from({ length: 201 }, (_, index) => `Key ${index}=value-${index}`);
@@ -102,11 +143,15 @@ test.describe('vault bulk import', () => {
     await typeConfirmCode(page);
     await page.getByTestId('vault-account-bulk-import').click();
 
-    await expect(page.getByText(first)).toBeVisible();
-    await expect(page.getByText(second)).toBeVisible();
+    // The grouped view renders each label in the sidebar chip, the group header,
+    // and the row paragraph; the row paragraph is the unique per-key target.
+    const rowLabel = (label: string) =>
+      page.getByTestId('vault-account-items').locator('p').filter({ hasText: label });
+    await expect(rowLabel(first)).toBeVisible();
+    await expect(rowLabel(second)).toBeVisible();
 
     await page.getByTestId('vault-account-filter').fill('Alpha');
-    await expect(page.getByText(first)).toBeVisible();
-    await expect(page.getByText(second)).toHaveCount(0);
+    await expect(rowLabel(first)).toBeVisible();
+    await expect(rowLabel(second)).toHaveCount(0);
   });
 });
