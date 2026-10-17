@@ -1,17 +1,48 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, ShieldAlert } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronRight,
+  ChevronsUpDown,
+  Eye,
+  KeyRound,
+  Link2,
+  MoreHorizontal,
+  Plus,
+  Search,
+  ShieldAlert,
+  ShieldCheck,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Panel, StatusPill, type PillTone } from "@/components/portal/Panel";
 import { ConfirmGate } from "@/components/portal/ConfirmGate";
 import { CopyButton, EmptyState } from "@/components/portal/EmptyState";
 import { OneTimeSecret } from "@/components/portal/OneTimeSecret";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useConfirmChallenge } from "@/hooks/useConfirmChallenge";
 import { api, errorMessage, isConfirmSecretMissing } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import type { MeResponse, Workspace } from "@/lib/types";
 import { toast } from "@/utils/toast";
 
@@ -20,6 +51,10 @@ type Health = "unchecked" | "healthy" | "weak" | "stale";
 type AuthScheme = "bearer" | "x-api-key" | "basic" | "query" | "body_json" | "path";
 type RouteHealth = "unknown" | "ok" | "unauthorized" | "forbidden_group" | "unreachable";
 type UrlKind = "api_base" | "api_endpoint" | "docs" | "console" | "cors" | "s3_endpoint";
+
+/** What every write on this page needs: a typed, single-use confirmation code. */
+type Gate = { confirmSecret: string; mfaCode?: string };
+type GateBody = () => Gate | null;
 
 interface VaultItem {
   id: string;
@@ -35,6 +70,7 @@ interface VaultItem {
   healthStatus: Health;
   healthDetail: string | null;
   staleSince: string | null;
+  createdAt: string;
 }
 
 interface VaultRoute {
@@ -85,6 +121,9 @@ const HEALTH_TONE: Record<Health, PillTone> = {
   unchecked: "muted",
 };
 
+/** Ascending health sorts the keys that need attention to the top. */
+const HEALTH_RANK: Record<Health, number> = { stale: 0, weak: 1, unchecked: 2, healthy: 3 };
+
 const ROUTE_TONE: Record<RouteHealth, PillTone> = {
   ok: "success",
   unauthorized: "danger",
@@ -111,8 +150,44 @@ const URL_KINDS: Array<{ value: UrlKind; label: string }> = [
   { value: "s3_endpoint", label: "S3 endpoint" },
 ];
 
+const KINDS: Array<{ value: Kind; label: string }> = [
+  { value: "login", label: "Login" },
+  { value: "token", label: "Token" },
+  { value: "url", label: "URL" },
+  { value: "note", label: "Note" },
+];
+
+const HEALTHS: Array<{ value: Health; label: string }> = [
+  { value: "healthy", label: "Healthy" },
+  { value: "weak", label: "Weak" },
+  { value: "stale", label: "Stale" },
+  { value: "unchecked", label: "Unchecked" },
+];
+
+const SCOPES = [
+  { value: "all", label: "All keys" },
+  { value: "account", label: "Account" },
+  { value: "workspace", label: "This workspace" },
+] as const;
+
+type Scope = (typeof SCOPES)[number]["value"];
+type SortKey = "label" | "kind" | "health" | "newest";
+type SortDir = "asc" | "desc";
+type KindFilter = "all" | Kind;
+type HealthFilter = "all" | Health;
+
 function relayUrl(routeKey: string): string {
   return `${window.location.origin}/api/vault/relay/${routeKey}`;
+}
+
+function timeOf(value: string | null | undefined): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function canHaveRoutes(item: VaultItem): boolean {
+  return item.kind === "token" || item.kind === "login";
 }
 
 export function VaultView({
@@ -122,10 +197,13 @@ export function VaultView({
   workspace: Workspace | null;
   me: MeResponse | null;
 }) {
+  const queryClient = useQueryClient();
   const challenge = useConfirmChallenge(true);
+  const [gateOpen, setGateOpen] = useState(false);
   const [typed, setTyped] = useState("");
   const [mfaCode, setMfaCode] = useState("");
   const [codeUsed, setCodeUsed] = useState(false);
+  const [scope, setScope] = useState<Scope>("all");
   const [rawSecret, setRawSecret] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<{ label: string; secret: string | null; notes: string | null } | null>(null);
 
@@ -148,12 +226,17 @@ export function VaultView({
   const accountItems = items.filter((item) => item.workspaceId === null);
   const workspaceItems = workspace ? items.filter((item) => item.workspaceId === workspace.id) : [];
 
-  function gateBody() {
-    return {
-      confirmSecret: typed,
-      mfaCode: me?.mfaEnabled ? mfaCode : undefined,
-    };
-  }
+  /** The gate is no longer a panel on the page: it opens the moment a write needs it. */
+  const gate: GateBody = () => {
+    const secret = typed.trim();
+    const needsMfa = Boolean(me?.mfaEnabled) && !mfaCode.trim();
+    if (!secret || needsMfa) {
+      setGateOpen(true);
+      toast.error(needsMfa && secret ? "Add the authenticator code too." : "Type the confirmation code first.");
+      return null;
+    }
+    return { confirmSecret: secret, mfaCode: me?.mfaEnabled ? mfaCode.trim() : undefined };
+  };
 
   function afterGate() {
     setTyped("");
@@ -177,19 +260,43 @@ export function VaultView({
 
   return (
     <div data-testid="view-vault" className="animate-fade-rise space-y-6">
-      <Panel eyebrow="Cabinet" title="Keys">
-        <p className="p-5 text-sm leading-relaxed text-muted-foreground">
-          Drop a login, token, URL, or note here. Account keys stay with you. Workspace keys stay on the workspace you assign.
-          At an event, mint a temporary grant and hand that to an agent. The grant reads one cabinet. The agent can ask for a decoy grant that answers the same way and never returns the stored secret.
+      <Panel
+        eyebrow="Cabinet"
+        title="Keys"
+        action={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-2 text-xs"
+            aria-haspopup="dialog"
+            onClick={() => setGateOpen(true)}
+          >
+            <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+            Confirmation
+            <code className="num rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold tracking-[0.18em] text-primary">
+              {challenge.code ?? "······"}
+            </code>
+          </Button>
+        }
+      >
+        <p className="max-w-3xl px-5 py-4 text-sm leading-relaxed text-muted-foreground">
+          Everything you keep for an agent lives here. Account keys follow you into every workspace;
+          workspace keys stay on the one you assign. Search the table, sort it, or open a key's routes to
+          see where an agent can send it. When it is time to hand a cabinet over, mint a temporary grant
+          and give the agent that — never the stored secret.
         </p>
       </Panel>
 
-      <Panel eyebrow="Gate" title="Confirm each change">
-        <div className="space-y-3 p-5">
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            Every save, import, mint, remove and revoke on this page uses the code below. It is
-            single-use, so a fresh one is issued as soon as you use it.
-          </p>
+      <Dialog open={gateOpen} onOpenChange={setGateOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirmation code</DialogTitle>
+            <DialogDescription>
+              Every save, import, mint, remove and revoke on this page uses one code. It is single-use, so
+              a fresh one is issued the moment you use it.
+            </DialogDescription>
+          </DialogHeader>
           <ConfirmGate
             code={challenge.code}
             expiresAt={challenge.expiresAt}
@@ -203,8 +310,24 @@ export function VaultView({
             mfaValue={mfaCode}
             onMfaChange={setMfaCode}
           />
-        </div>
-      </Panel>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setGateOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <MintGrant
+        workspace={workspace}
+        onMinted={(secret) => {
+          setRawSecret(secret);
+          afterGate();
+          void reload();
+        }}
+        gate={gate}
+        onError={onGateError}
+      />
 
       {rawSecret ? (
         <OneTimeSecret
@@ -224,18 +347,31 @@ export function VaultView({
         />
       ) : null}
 
-      <MintGrant
-        workspace={workspace}
-        onMinted={(secret) => {
-          setRawSecret(secret);
-          afterGate();
-          void reload();
-        }}
-        gate={gateBody}
-        onError={onGateError}
-      />
+      <div className="flex flex-wrap items-center gap-3">
+        <div role="group" aria-label="Scope" className="inline-flex overflow-hidden rounded-md border border-border">
+          {SCOPES.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={scope === option.value}
+              onClick={() => setScope(option.value)}
+              className={cn(
+                "h-8 px-3 text-xs font-medium transition-colors",
+                scope === option.value
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <p className="num text-xs text-muted-foreground">
+          {items.length} keys · {accountItems.length} account · {workspaceItems.length} workspace
+        </p>
+      </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      {scope === "all" || scope === "account" ? (
         <Cabinet
           idPrefix="vault-account"
           title="Account"
@@ -245,7 +381,7 @@ export function VaultView({
           error={itemsQuery.isError ? errorMessage(itemsQuery.error) : null}
           onRetry={() => void itemsQuery.refetch()}
           workspaceId={null}
-          gate={gateBody}
+          gate={gate}
           onSaved={() => {
             afterGate();
             void reload();
@@ -253,6 +389,9 @@ export function VaultView({
           onError={onGateError}
           onReveal={setRevealed}
         />
+      ) : null}
+
+      {scope === "all" || scope === "workspace" ? (
         <Cabinet
           idPrefix="vault-workspace"
           title={workspace ? workspace.name : "Workspace"}
@@ -263,7 +402,7 @@ export function VaultView({
           onRetry={() => void itemsQuery.refetch()}
           workspaceId={workspace?.id ?? null}
           disabled={!workspace}
-          gate={gateBody}
+          gate={gate}
           onSaved={() => {
             afterGate();
             void reload();
@@ -271,7 +410,7 @@ export function VaultView({
           onError={onGateError}
           onReveal={setRevealed}
         />
-      </div>
+      ) : null}
 
       <Panel
         eyebrow="Grants"
@@ -280,12 +419,14 @@ export function VaultView({
           <Button
             size="sm"
             variant="outline"
-            className="gap-1.5"
+            className="h-8 gap-1.5 text-xs"
             onClick={async () => {
+              const body = gate();
+              if (!body) return;
               try {
-                const result = await api.post<{ purged: number }>("/api/vault/health", gateBody());
+                const result = await api.post<{ purged: number }>("/api/vault/health", body);
                 toast.success(
-                  result.purged ? `Checked keys and routes. Removed ${result.purged} stale.` : "Checked keys and routes."
+                  result.purged ? `Checked keys and routes. Removed ${result.purged} stale.` : "Checked keys and routes.",
                 );
                 afterGate();
                 void reload();
@@ -317,8 +458,10 @@ export function VaultView({
                     variant="ghost"
                     className="ml-auto h-7 text-xs"
                     onClick={async () => {
+                      const body = gate();
+                      if (!body) return;
                       try {
-                        await api.del(`/api/vault/grants/${grant.id}`, gateBody());
+                        await api.del(`/api/vault/grants/${grant.id}`, body);
                         toast.success("Grant revoked");
                         afterGate();
                         void reload();
@@ -339,7 +482,7 @@ export function VaultView({
       <WorkingKeys
         leases={leases}
         loading={leasesQuery.isPending}
-        gate={gateBody}
+        gate={gate}
         onError={onGateError}
         onRevoked={() => {
           afterGate();
@@ -347,6 +490,36 @@ export function VaultView({
         }}
       />
     </div>
+  );
+}
+
+function SortHeader({
+  column,
+  label,
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  column: SortKey;
+  label: string;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sortKey === column;
+  const Icon = !active ? ChevronsUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(column)}
+      className={cn(
+        "inline-flex items-center gap-1 transition-colors hover:text-foreground",
+        active && "text-foreground",
+      )}
+    >
+      {label}
+      <Icon className={cn("h-3 w-3", active ? "opacity-90" : "opacity-40")} />
+    </button>
   );
 }
 
@@ -359,15 +532,17 @@ function WorkingKeys({
 }: {
   leases: VaultLease[];
   loading: boolean;
-  gate: () => { confirmSecret: string; mfaCode?: string };
+  gate: GateBody;
   onError: (error: unknown) => void;
   onRevoked: () => void;
 }) {
   const queryClient = useQueryClient();
 
   async function revoke(lease: VaultLease) {
+    const body = gate();
+    if (!body) return;
     try {
-      await api.del(`/api/vault/leases/${lease.id}`, gate());
+      await api.del(`/api/vault/leases/${lease.id}`, body);
       toast.success("Working key revoked");
       await queryClient.invalidateQueries({ queryKey: ["vault-leases"] });
       onRevoked();
@@ -434,7 +609,7 @@ function MintGrant({
 }: {
   workspace: Workspace | null;
   onMinted: (secret: string) => void;
-  gate: () => { confirmSecret: string; mfaCode?: string };
+  gate: GateBody;
   onError: (error: unknown) => void;
 }) {
   const [name, setName] = useState("");
@@ -447,13 +622,15 @@ function MintGrant({
       toast.error("Name the grant");
       return;
     }
+    const body = gate();
+    if (!body) return;
     setBusy(true);
     try {
       const result = await api.post<{ rawSecret: string }>("/api/vault/grants", {
         name: name.trim(),
         expiresInHours: Number(hours),
         workspaceId: scope === "workspace" ? workspace?.id : null,
-        ...gate(),
+        ...body,
       });
       onMinted(result.rawSecret);
       setName("");
@@ -537,7 +714,7 @@ function Cabinet({
   onRetry: () => void;
   workspaceId: string | null;
   disabled?: boolean;
-  gate: () => { confirmSecret: string; mfaCode?: string };
+  gate: GateBody;
   onSaved: () => void;
   onError: (error: unknown) => void;
   onReveal: (value: { label: string; secret: string | null; notes: string | null }) => void;
@@ -546,39 +723,81 @@ function Cabinet({
   const [description, setDescription] = useState("");
   const [kind, setKind] = useState<Kind>("token");
   const [urlKind, setUrlKind] = useState<UrlKind>("api_base");
-  const [openRoutes, setOpenRoutes] = useState<string | null>(null);
   const [username, setUsername] = useState("");
   const [url, setUrl] = useState("");
   const [secret, setSecret] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+
   const [filter, setFilter] = useState("");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
+  const [sortKey, setSortKey] = useState<SortKey>("label");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [openRoutes, setOpenRoutes] = useState<string | null>(null);
+
+  const [addOpen, setAddOpen] = useState<boolean | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  const filtered = useMemo(() => {
+  // Closed once the cabinet holds keys, open while it is still empty.
+  const addFormOpen = addOpen ?? items.length === 0;
+
+  const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase();
-    if (!needle) return items;
-    return items.filter((item) =>
-      `${item.label} ${item.description}`.toLowerCase().includes(needle),
-    );
-  }, [items, filter]);
+    const matches = items.filter((item) => {
+      if (kindFilter !== "all" && item.kind !== kindFilter) return false;
+      if (healthFilter !== "all" && item.healthStatus !== healthFilter) return false;
+      if (!needle) return true;
+      return `${item.label} ${item.description} ${item.url ?? ""}`.toLowerCase().includes(needle);
+    });
+    const direction = sortDir === "asc" ? 1 : -1;
+    return [...matches].sort((a, b) => {
+      if (sortKey === "kind") return a.kind.localeCompare(b.kind) * direction;
+      if (sortKey === "health") return (HEALTH_RANK[a.healthStatus] - HEALTH_RANK[b.healthStatus]) * direction;
+      if (sortKey === "newest") return (timeOf(a.createdAt) - timeOf(b.createdAt)) * direction;
+      return a.label.localeCompare(b.label) * direction;
+    });
+  }, [items, filter, kindFilter, healthFilter, sortKey, sortDir]);
+
+  const filtersActive = filter.trim().length > 0 || kindFilter !== "all" || healthFilter !== "all";
 
   const bulkLines = bulkText.split("\n").map((line) => line.trim()).filter(Boolean);
+
+  function clearFilters() {
+    setFilter("");
+    setKindFilter("all");
+    setHealthFilter("all");
+  }
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir(key === "newest" ? "desc" : "asc");
+  }
+
+  function toggleRoutes(id: string) {
+    setOpenRoutes((current) => (current === id ? null : id));
+  }
 
   async function importMany() {
     if (bulkLines.length === 0) {
       toast.error("Paste at least one LABEL=secret line");
       return;
     }
+    const body = gate();
+    if (!body) return;
     setBulkBusy(true);
     try {
       const result = await api.post<{ inserted: number }>("/api/vault/items/bulk", {
         lines: bulkLines,
         kind,
         workspaceId,
-        ...gate(),
+        ...body,
       });
       setBulkText("");
       toast.success(`Imported ${result.inserted} key${result.inserted === 1 ? "" : "s"}`);
@@ -591,6 +810,8 @@ function Cabinet({
   }
 
   async function save() {
+    const body = gate();
+    if (!body) return;
     setBusy(true);
     try {
       await api.post("/api/vault/items", {
@@ -603,7 +824,7 @@ function Cabinet({
         secret,
         notes,
         workspaceId,
-        ...gate(),
+        ...body,
       });
       setLabel("");
       setDescription("");
@@ -620,232 +841,427 @@ function Cabinet({
     }
   }
 
-  return (
-    <Panel eyebrow={eyebrow} title={title}>
-      <div className="space-y-4 p-5">
-        {disabled ? (
-          <p className="text-sm text-muted-foreground">Create a workspace before assigning keys to one.</p>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>Label</Label>
-              <Input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Cloudflare" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Kind</Label>
-              <Select
-                value={kind}
-                onValueChange={(value) => {
-                  setKind(value as Kind);
-                  if (value !== "url") setUrlKind("api_base");
-                }}
-              >
-                <SelectTrigger id={`${idPrefix}-kind`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="login">Login</SelectItem>
-                  <SelectItem value="token">Token</SelectItem>
-                  <SelectItem value="url">URL</SelectItem>
-                  <SelectItem value="note">Note</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Username</Label>
-              <Input value={username} onChange={(event) => setUsername(event.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>URL</Label>
-              <Input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://" />
-            </div>
-            {kind === "url" ? (
-              <div className="space-y-1.5">
-                <Label>URL kind</Label>
-                <Select value={urlKind} onValueChange={(value) => setUrlKind(value as UrlKind)}>
-                  <SelectTrigger id={`${idPrefix}-urlkind`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {URL_KINDS.map((choice) => (
-                      <SelectItem key={choice.value} value={choice.value}>
-                        {choice.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor={`${idPrefix}-description`}>Description</Label>
-              <Input
-                id={`${idPrefix}-description`}
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder={
-                  kind === "login"
-                    ? "What this password is for, so an agent picks the right one"
-                    : "What this key is for, so an agent does not mix it up"
-                }
-              />
-            </div>
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor={`${idPrefix}-secret`}>{kind === "login" ? "Password" : kind === "token" ? "Token" : "Secret"}</Label>
-              <Input
-                id={`${idPrefix}-secret`}
-                value={secret}
-                onChange={(event) => setSecret(event.target.value)}
-                type="password"
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label>Notes</Label>
-              <Input value={notes} onChange={(event) => setNotes(event.target.value)} />
-            </div>
-            <Button type="button" disabled={busy} onClick={() => void save()}>
-              Save key
-            </Button>
-          </div>
-        )}
+  async function reveal(item: VaultItem) {
+    try {
+      const result = await api.get<{ item: { label: string; secret: string | null; notes: string | null } }>(
+        `/api/vault/items/${item.id}`,
+      );
+      onReveal({ label: result.item.label, secret: result.item.secret, notes: result.item.notes });
+    } catch (caught) {
+      onError(caught);
+    }
+  }
 
-        {!disabled ? (
-          <div className="rounded-md border border-border">
-            <button
+  async function remove(item: VaultItem) {
+    const body = gate();
+    if (!body) return;
+    try {
+      await api.del(`/api/vault/items/${item.id}`, body);
+      toast.success("Removed");
+      onSaved();
+    } catch (caught) {
+      onError(caught);
+    }
+  }
+
+  function rowMenu(item: VaultItem) {
+    const routesOpen = openRoutes === item.id;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={`Actions for ${item.label}`}
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem onSelect={() => void reveal(item)}>
+            <Eye className="mr-2 h-3.5 w-3.5" /> Show
+          </DropdownMenuItem>
+          {canHaveRoutes(item) ? (
+            <DropdownMenuItem onSelect={() => toggleRoutes(item.id)}>
+              <Link2 className="mr-2 h-3.5 w-3.5" /> {routesOpen ? "Hide routes" : "Routes"}
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => void remove(item)}
+            className="text-destructive focus:text-destructive"
+          >
+            <Trash2 className="mr-2 h-3.5 w-3.5" /> Remove
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
+  return (
+    <Panel
+      eyebrow={eyebrow}
+      title={title}
+      action={
+        <>
+          <StatusPill tone="muted">{items.length}</StatusPill>
+          {disabled ? null : (
+            <Button
               type="button"
-              data-testid={`${idPrefix}-bulk-toggle`}
-              onClick={() => setBulkOpen((open) => !open)}
-              className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
+              size="sm"
+              variant={addFormOpen ? "ghost" : "outline"}
+              className="h-8 gap-1.5 text-xs"
+              data-testid={`${idPrefix}-add-toggle`}
+              aria-expanded={addFormOpen}
+              onClick={() => setAddOpen(!addFormOpen)}
             >
-              <span>Paste many — one key per line</span>
-              <span>{bulkOpen ? "hide" : "open"}</span>
-            </button>
-            {bulkOpen ? (
-              <div className="space-y-2 border-t border-border p-3">
-                <Textarea
-                  data-testid={`${idPrefix}-bulk`}
-                  value={bulkText}
-                  onChange={(event) => setBulkText(event.target.value)}
-                  rows={5}
-                  spellCheck={false}
-                  placeholder={"Cloudflare=cf-token\nGitHub=ghp_xxxx"}
-                  className="num bg-background text-xs"
-                />
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-[11px] text-muted-foreground">
-                    LABEL=secret per line, saved as {kind}. The description is set to the label.
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="ml-auto h-8 text-xs"
-                    data-testid={`${idPrefix}-bulk-import`}
-                    disabled={bulkBusy || bulkLines.length === 0}
-                    onClick={() => void importMany()}
-                  >
-                    {bulkBusy
-                      ? "Importing…"
-                      : bulkLines.length === 0
-                        ? "Import keys"
-                        : `Import ${bulkLines.length} key${bulkLines.length === 1 ? "" : "s"}`}
-                  </Button>
+              {addFormOpen ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+              {addFormOpen ? "Close" : "Add a key"}
+            </Button>
+          )}
+        </>
+      }
+    >
+      <div className="divide-y divide-border">
+        {disabled ? (
+          <p className="px-5 py-4 text-sm text-muted-foreground">
+            Create a workspace before assigning keys to one.
+          </p>
+        ) : (
+          <>
+            {addFormOpen ? (
+              <div className="p-5">
+                <div className="grid gap-3 rounded-md border border-border bg-muted/30 p-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Label</Label>
+                    <Input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Cloudflare" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Kind</Label>
+                    <Select
+                      value={kind}
+                      onValueChange={(value) => {
+                        setKind(value as Kind);
+                        if (value !== "url") setUrlKind("api_base");
+                      }}
+                    >
+                      <SelectTrigger id={`${idPrefix}-kind`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {KINDS.map((choice) => (
+                          <SelectItem key={choice.value} value={choice.value}>
+                            {choice.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Username</Label>
+                    <Input value={username} onChange={(event) => setUsername(event.target.value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>URL</Label>
+                    <Input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://" />
+                  </div>
+                  {kind === "url" ? (
+                    <div className="space-y-1.5">
+                      <Label>URL kind</Label>
+                      <Select value={urlKind} onValueChange={(value) => setUrlKind(value as UrlKind)}>
+                        <SelectTrigger id={`${idPrefix}-urlkind`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {URL_KINDS.map((choice) => (
+                            <SelectItem key={choice.value} value={choice.value}>
+                              {choice.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor={`${idPrefix}-description`}>Description</Label>
+                    <Input
+                      id={`${idPrefix}-description`}
+                      value={description}
+                      onChange={(event) => setDescription(event.target.value)}
+                      placeholder={
+                        kind === "login"
+                          ? "What this password is for, so an agent picks the right one"
+                          : "What this key is for, so an agent does not mix it up"
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor={`${idPrefix}-secret`}>
+                      {kind === "login" ? "Password" : kind === "token" ? "Token" : "Secret"}
+                    </Label>
+                    <Input
+                      id={`${idPrefix}-secret`}
+                      value={secret}
+                      onChange={(event) => setSecret(event.target.value)}
+                      type="password"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label>Notes</Label>
+                    <Input value={notes} onChange={(event) => setNotes(event.target.value)} />
+                  </div>
+                  <div className="flex items-center gap-2 sm:col-span-2">
+                    <Button type="button" disabled={busy} onClick={() => void save()}>
+                      Save key
+                    </Button>
+                    <p className="text-[11px] text-muted-foreground">
+                      Needs the confirmation code. The code refreshes after each save.
+                    </p>
+                  </div>
                 </div>
               </div>
             ) : null}
-          </div>
-        ) : null}
 
-        {error ? (
-          <EmptyState title="Could not load keys" description={error} action={<Button onClick={onRetry}>Retry</Button>} />
-        ) : loading ? (
-          <div className="h-16 animate-pulse rounded-md bg-muted" />
-        ) : items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing stored here yet.</p>
-        ) : (
-          <div className="space-y-2">
-            <Input
-              data-testid={`${idPrefix}-filter`}
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-              placeholder={`Filter ${items.length} key${items.length === 1 ? "" : "s"}`}
-              className="h-8 bg-background text-sm"
-              aria-label="Filter keys"
-            />
-            {filtered.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No keys match “{filter}”.{" "}
-                <button type="button" className="underline underline-offset-2" onClick={() => setFilter("")}>
-                  Clear
+            <div className="p-5">
+              <div className="rounded-md border border-border">
+                <button
+                  type="button"
+                  data-testid={`${idPrefix}-bulk-toggle`}
+                  onClick={() => setBulkOpen((open) => !open)}
+                  className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <span>Paste many — one key per line</span>
+                  <span>{bulkOpen ? "hide" : "open"}</span>
                 </button>
-              </p>
-            ) : (
-              <ul className="space-y-1" data-testid={`${idPrefix}-items`}>
-                {filtered.map((item) => (
-                  <li key={item.id} className="rounded-md border border-border">
-                    <div className="flex flex-wrap items-center gap-2 px-3 py-1.5">
-                      <span className="min-w-0 flex-1 truncate text-sm">
-                        <span className="font-medium">{item.label}</span>
-                        {item.description && item.description !== item.label ? (
-                          <span className="ml-2 text-xs text-muted-foreground">{item.description}</span>
-                        ) : null}
-                      </span>
-                      <StatusPill tone="muted">{item.kind}</StatusPill>
-                      <span title={item.healthDetail ?? undefined}>
-                        <StatusPill tone={HEALTH_TONE[item.healthStatus]}>{item.healthStatus}</StatusPill>
-                      </span>
-                      {item.kind === "token" || item.kind === "login" ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs"
-                          data-testid={`vault-routes-${item.id}-toggle`}
-                          onClick={() => setOpenRoutes((current) => (current === item.id ? null : item.id))}
-                        >
-                          {openRoutes === item.id ? "Hide routes" : "Routes"}
-                        </Button>
-                      ) : null}
+                {bulkOpen ? (
+                  <div className="space-y-2 border-t border-border p-3">
+                    <Textarea
+                      data-testid={`${idPrefix}-bulk`}
+                      value={bulkText}
+                      onChange={(event) => setBulkText(event.target.value)}
+                      rows={5}
+                      spellCheck={false}
+                      placeholder={"Cloudflare=cf-token\nGitHub=ghp_xxxx"}
+                      className="num bg-background text-xs"
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-[11px] text-muted-foreground">
+                        LABEL=secret per line, saved as {kind}. The description is set to the label.
+                      </p>
                       <Button
+                        type="button"
                         size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs"
-                        onClick={async () => {
-                          try {
-                            const result = await api.get<{ item: { label: string; secret: string | null; notes: string | null } }>(
-                              `/api/vault/items/${item.id}`,
-                            );
-                            onReveal({ label: result.item.label, secret: result.item.secret, notes: result.item.notes });
-                          } catch (caught) {
-                            onError(caught);
-                          }
-                        }}
+                        className="ml-auto h-8 text-xs"
+                        data-testid={`${idPrefix}-bulk-import`}
+                        disabled={bulkBusy || bulkLines.length === 0}
+                        onClick={() => void importMany()}
                       >
-                        Show
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs"
-                        onClick={async () => {
-                          try {
-                            await api.del(`/api/vault/items/${item.id}`, gate());
-                            toast.success("Removed");
-                            onSaved();
-                          } catch (caught) {
-                            onError(caught);
-                          }
-                        }}
-                      >
-                        Remove
+                        {bulkBusy
+                          ? "Importing…"
+                          : bulkLines.length === 0
+                            ? "Import keys"
+                            : `Import ${bulkLines.length} key${bulkLines.length === 1 ? "" : "s"}`}
                       </Button>
                     </div>
-                    {openRoutes === item.id ? (
-                      <ItemRoutes item={item} gate={gate} onError={onError} onChanged={onSaved} />
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </>
+        )}
+
+        {disabled ? null : error ? (
+          <EmptyState
+            title="Could not load keys"
+            description={error}
+            action={<Button onClick={onRetry}>Retry</Button>}
+          />
+        ) : loading ? (
+          <div className="space-y-2 p-5">
+            <div className="h-9 animate-pulse rounded-md bg-muted" />
+            <div className="h-9 animate-pulse rounded-md bg-muted" />
+            <div className="h-9 animate-pulse rounded-md bg-muted" />
           </div>
+        ) : items.length === 0 ? (
+          <EmptyState
+            motif="keys"
+            title="Nothing stored here yet"
+            description="Add a login, a token, a URL or a note. An agent only ever sees the cabinet a grant points at."
+          />
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+              <div className="relative min-w-[180px] flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  data-testid={`${idPrefix}-filter`}
+                  value={filter}
+                  onChange={(event) => setFilter(event.target.value)}
+                  placeholder="Search label, description or url"
+                  aria-label="Filter keys"
+                  className="h-8 bg-background pl-8 text-sm"
+                />
+              </div>
+              <Select value={kindFilter} onValueChange={(value) => setKindFilter(value as KindFilter)}>
+                <SelectTrigger className="h-8 w-[116px] bg-background text-xs" aria-label="Filter by kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All kinds</SelectItem>
+                  {KINDS.map((choice) => (
+                    <SelectItem key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={healthFilter} onValueChange={(value) => setHealthFilter(value as HealthFilter)}>
+                <SelectTrigger className="h-8 w-[126px] bg-background text-xs" aria-label="Filter by health">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All health</SelectItem>
+                  {HEALTHS.map((choice) => (
+                    <SelectItem key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                size="sm"
+                variant={sortKey === "newest" ? "default" : "outline"}
+                className="h-8 gap-1.5 text-xs"
+                onClick={() => toggleSort("newest")}
+              >
+                {sortKey === "newest" && sortDir === "asc" ? (
+                  <ArrowUp className="h-3.5 w-3.5" />
+                ) : (
+                  <ArrowDown className="h-3.5 w-3.5" />
+                )}
+                Newest
+              </Button>
+              <span className="num ml-auto text-xs text-muted-foreground">
+                {visible.length} of {items.length}
+              </span>
+              {filtersActive ? (
+                <Button type="button" size="sm" variant="ghost" className="h-8 text-xs" onClick={clearFilters}>
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+
+            <div data-testid={`${idPrefix}-items`}>
+              {/* Stacked on narrow screens, a real table from md up. */}
+              <table className="data-table block md:table">
+                <thead className="hidden md:table-header-group">
+                  <tr>
+                    <th aria-sort={sortKey === "label" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                      <SortHeader column="label" label="Key" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    </th>
+                    <th
+                      className="w-[104px]"
+                      aria-sort={sortKey === "kind" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+                    >
+                      <SortHeader column="kind" label="Kind" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    </th>
+                    <th
+                      className="w-[128px]"
+                      aria-sort={sortKey === "health" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+                    >
+                      <SortHeader column="health" label="Health" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    </th>
+                    <th className="w-12 text-right">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="block md:table-row-group">
+                  {visible.length === 0 ? (
+                    <tr className="block md:table-row">
+                      <td colSpan={4} className="block px-4 py-6 text-sm text-muted-foreground md:table-cell md:px-5">
+                        No keys match these filters.{" "}
+                        <button type="button" className="underline underline-offset-2" onClick={clearFilters}>
+                          Clear
+                        </button>
+                      </td>
+                    </tr>
+                  ) : (
+                    visible.map((item) => {
+                      const routesOpen = openRoutes === item.id;
+                      return (
+                        <Fragment key={item.id}>
+                          <tr className="relative block border-b border-border/70 transition-colors hover:bg-accent/40 md:table-row">
+                            <td className="block px-4 py-3 pr-12 align-middle md:table-cell md:px-5 md:py-2.5 md:pr-4">
+                              <div className="flex items-start gap-2">
+                                {canHaveRoutes(item) ? (
+                                  <button
+                                    type="button"
+                                    data-testid={`vault-routes-${item.id}-toggle`}
+                                    aria-expanded={routesOpen}
+                                    aria-label={routesOpen ? "Hide routes" : "Show routes"}
+                                    onClick={() => toggleRoutes(item.id)}
+                                    className="-ml-1 mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                  >
+                                    <ChevronRight
+                                      className={cn("h-3.5 w-3.5 transition-transform", routesOpen && "rotate-90")}
+                                    />
+                                  </button>
+                                ) : (
+                                  <span className="mt-0.5 hidden h-5 w-4 shrink-0 md:block" />
+                                )}
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium leading-5 text-foreground">{item.label}</p>
+                                  {item.description && item.description !== item.label ? (
+                                    <p className="truncate text-xs leading-5 text-muted-foreground">{item.description}</p>
+                                  ) : null}
+                                  {item.url ? (
+                                    <p className="num truncate text-[11px] leading-4 text-muted-foreground/80">{item.url}</p>
+                                  ) : null}
+                                  <div className="mt-1 flex flex-wrap items-center gap-1.5 md:hidden">
+                                    <StatusPill tone="muted">{item.kind}</StatusPill>
+                                    <span title={item.healthDetail ?? undefined}>
+                                      <StatusPill tone={HEALTH_TONE[item.healthStatus]} dot>
+                                        {item.healthStatus}
+                                      </StatusPill>
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="hidden align-middle md:table-cell md:w-[104px] md:px-4 md:py-2.5">
+                              <StatusPill tone="muted">{item.kind}</StatusPill>
+                            </td>
+                            <td className="hidden align-middle md:table-cell md:w-[128px] md:px-4 md:py-2.5">
+                              <span title={item.healthDetail ?? undefined}>
+                                <StatusPill tone={HEALTH_TONE[item.healthStatus]} dot>
+                                  {item.healthStatus}
+                                </StatusPill>
+                              </span>
+                            </td>
+                            <td className="absolute right-1 top-2 p-0 md:static md:table-cell md:w-12 md:px-4 md:py-2.5 md:text-right">
+                              {rowMenu(item)}
+                            </td>
+                          </tr>
+                          {routesOpen ? (
+                            <tr className="block bg-muted/30 md:table-row">
+                              <td colSpan={4} className="block p-0 md:table-cell">
+                                <ItemRoutes item={item} gate={gate} onError={onError} onChanged={onSaved} />
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </Panel>
@@ -859,7 +1275,7 @@ function ItemRoutes({
   onChanged,
 }: {
   item: VaultItem;
-  gate: () => { confirmSecret: string; mfaCode?: string };
+  gate: GateBody;
   onError: (error: unknown) => void;
   onChanged: () => void;
 }) {
@@ -884,6 +1300,8 @@ function ItemRoutes({
       toast.error("Name the route and give it a base URL");
       return;
     }
+    const body = gate();
+    if (!body) return;
     setBusy(true);
     try {
       await api.post(`/api/vault/items/${item.id}/routes`, {
@@ -894,7 +1312,7 @@ function ItemRoutes({
         bodyField: bodyField.trim() || undefined,
         basicUsername: basicUsername.trim() || undefined,
         routeKey: routeKey.trim() || undefined,
-        ...gate(),
+        ...body,
       });
       setName("");
       setBaseUrl("");
@@ -913,8 +1331,10 @@ function ItemRoutes({
   }
 
   async function remove(route: VaultRoute) {
+    const body = gate();
+    if (!body) return;
     try {
-      await api.del(`/api/vault/items/${item.id}/routes/${route.id}`, gate());
+      await api.del(`/api/vault/items/${item.id}/routes/${route.id}`, body);
       toast.success("Route removed");
       await queryClient.invalidateQueries({ queryKey: ["vault-routes", item.id] });
       onChanged();
@@ -924,7 +1344,7 @@ function ItemRoutes({
   }
 
   return (
-    <div className="space-y-2 border-t border-border p-3" data-testid={`vault-routes-${item.id}`}>
+    <div className="space-y-2 p-4 md:px-5" data-testid={`vault-routes-${item.id}`}>
       {routesQuery.isPending ? (
         <div className="h-10 animate-pulse rounded-md bg-muted" />
       ) : routes.length === 0 ? (
@@ -934,7 +1354,7 @@ function ItemRoutes({
       ) : (
         <ul className="space-y-1.5">
           {routes.map((route) => (
-            <li key={route.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border px-2 py-1.5">
+            <li key={route.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5">
               <span className="text-xs font-medium">{route.name}</span>
               <span className="num text-[11px] text-muted-foreground">{route.routeKey}</span>
               <StatusPill tone="muted">{route.authScheme}</StatusPill>
@@ -962,15 +1382,17 @@ function ItemRoutes({
           onChange={(event) => setName(event.target.value)}
           placeholder="Route name, e.g. Fish Audio API"
           aria-label="Route name"
+          className="h-8 bg-background text-sm"
         />
         <Input
           value={baseUrl}
           onChange={(event) => setBaseUrl(event.target.value)}
           placeholder="Base URL, e.g. https://api.fish.audio"
           aria-label="Base URL"
+          className="h-8 bg-background text-sm"
         />
         <Select value={authScheme} onValueChange={(value) => setAuthScheme(value as AuthScheme)}>
-          <SelectTrigger aria-label="Auth scheme">
+          <SelectTrigger aria-label="Auth scheme" className="h-8 bg-background text-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -987,6 +1409,7 @@ function ItemRoutes({
             onChange={(event) => setAuthHeader(event.target.value)}
             placeholder={authScheme === "query" ? "Query parameter, e.g. api_key" : "Header, e.g. x-api-key"}
             aria-label="Auth header or query parameter"
+            className="h-8 bg-background text-sm"
           />
         ) : null}
         {authScheme === "body_json" || authScheme === "path" ? (
@@ -995,6 +1418,7 @@ function ItemRoutes({
             onChange={(event) => setBodyField(event.target.value)}
             placeholder={authScheme === "path" ? "Path template, e.g. bot{key}/getMe" : "Body field, e.g. api_key"}
             aria-label="Body field or path template"
+            className="h-8 bg-background text-sm"
           />
         ) : null}
         {authScheme === "basic" ? (
@@ -1003,6 +1427,7 @@ function ItemRoutes({
             onChange={(event) => setBasicUsername(event.target.value)}
             placeholder="Basic username (optional)"
             aria-label="Basic username"
+            className="h-8 bg-background text-sm"
           />
         ) : null}
         <Input
@@ -1010,8 +1435,9 @@ function ItemRoutes({
           onChange={(event) => setRouteKey(event.target.value)}
           placeholder="Route key (optional, auto-generated)"
           aria-label="Route key"
+          className="h-8 bg-background text-sm"
         />
-        <Button type="button" disabled={busy} onClick={() => void add()}>
+        <Button type="button" size="sm" className="h-8 text-xs" disabled={busy} onClick={() => void add()}>
           Add route
         </Button>
       </div>
