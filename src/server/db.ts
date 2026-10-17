@@ -6,6 +6,7 @@
  */
 
 import pg from 'pg';
+import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { GraphProjectionRow, GraphProjectionRecord } from '../types/graph';
 export type { GraphProjectionRow, GraphProjectionRecord } from '../types/graph';
@@ -2664,6 +2665,42 @@ export async function dbInsertVaultItem(input: {
       input.notesEncrypted,
     ]
   );
+}
+
+export async function dbInsertVaultItemsBulk(
+  principalId: string,
+  items: Array<{
+    workspaceId: string | null;
+    label: string;
+    description: string;
+    kind: string;
+    username: string | null;
+    url: string | null;
+    secretEncrypted: string | null;
+    notesEncrypted: string | null;
+  }>
+): Promise<void> {
+  await withTransaction(async (client) => {
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO octo.vault_items (
+           id, principal_id, workspace_id, label, description, kind, username, url, secret_encrypted, notes_encrypted
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          randomUUID(),
+          principalId,
+          item.workspaceId,
+          item.label,
+          item.description,
+          item.kind,
+          item.username,
+          item.url,
+          item.secretEncrypted,
+          item.notesEncrypted,
+        ]
+      );
+    }
+  });
 }
 
 export async function dbDeleteVaultItem(principalId: string, itemId: string): Promise<boolean> {

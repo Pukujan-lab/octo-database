@@ -5,6 +5,7 @@ import { api, errorMessage } from "@/lib/api";
  *  code that a human types. Fetch a fresh code each time a gated form opens. */
 export function useConfirmChallenge(open: boolean) {
   const [code, setCode] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -12,10 +13,12 @@ export function useConfirmChallenge(open: boolean) {
     setLoading(true);
     setError(null);
     try {
-      const result = await api.post<{ code: string }>("/api/me/confirm-challenge", {});
+      const result = await api.post<{ code: string; expiresAt?: string }>("/api/me/confirm-challenge", {});
       setCode(result.code);
+      setExpiresAt(result.expiresAt ?? null);
     } catch (err) {
       setCode(null);
+      setExpiresAt(null);
       setError(errorMessage(err));
     } finally {
       setLoading(false);
@@ -25,11 +28,12 @@ export function useConfirmChallenge(open: boolean) {
   useEffect(() => {
     if (!open) {
       setCode(null);
+      setExpiresAt(null);
       setError(null);
       return;
     }
     void request();
   }, [open, request]);
 
-  return { code, loading, error, refresh: request };
+  return { code, expiresAt, loading, error, refresh: request };
 }

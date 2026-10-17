@@ -12,11 +12,15 @@ import { hashApiKeySecret } from '../lib/secret-hash';
 import { decryptSecret, encryptSecret } from '../lib/mfa';
 import { checkVaultItem } from '../lib/vault-health';
 import {
+  BULK_MAX_LINES,
   grantExpiresAt,
+  parseBulkVaultLine,
   parseGrantHours,
   parseVaultItem,
   presentVaultItem,
   STALE_PURGE_MS,
+  VAULT_KINDS,
+  type VaultItemInput,
   type VaultKind,
 } from '../lib/vault-policy';
 import { authenticateRequest } from '../server/auth-context';
@@ -30,6 +34,7 @@ import {
   dbInsertVaultGrant,
   dbInsertVaultGrantService,
   dbInsertVaultItem,
+  dbInsertVaultItemsBulk,
   dbListVaultGrants,
   dbListVaultItems,
   dbListVaultItemsForGrant,
@@ -181,6 +186,63 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
       });
       const created = await dbGetVaultItem(auth.principal.id, id);
       sendJson(res, 201, { item: created ? publicItem(created) : { id } });
+      return true;
+    }
+
+    if (path === '/api/vault/items/bulk' && req.method === 'POST') {
+      const body = await readJsonObject(req);
+      const rawLines = body['lines'];
+      if (!Array.isArray(rawLines) || rawLines.some((line) => typeof line !== 'string')) {
+        sendJson(res, 400, { error: 'BULK_LINES: lines must be an array of LABEL=secret strings.' });
+        return true;
+      }
+      const lines = (rawLines as string[]).map((line) => line.trim()).filter(Boolean);
+      if (lines.length === 0) {
+        sendJson(res, 400, { error: 'BULK_LINES: paste at least one LABEL=secret line.' });
+        return true;
+      }
+      if (lines.length > BULK_MAX_LINES) {
+        sendJson(res, 400, { error: `BULK_TOO_LARGE: at most ${BULK_MAX_LINES} lines per paste.` });
+        return true;
+      }
+      const kindRaw = typeof body['kind'] === 'string' ? body['kind'] : 'token';
+      if (!VAULT_KINDS.includes(kindRaw as VaultKind)) {
+        sendJson(res, 400, { error: 'KIND_INVALID: kind must be login, token, url, or note.' });
+        return true;
+      }
+      const workspaceId = body['workspaceId'];
+      const scope = workspaceId === undefined || workspaceId === null || workspaceId === '' ? null : String(workspaceId);
+      if (!(await workspaceAllowed(res, auth.principal.id, scope))) return true;
+
+      // Validate every line before the gate so a malformed paste never
+      // consumes the one-time code.
+      const parsed: VaultItemInput[] = [];
+      for (let index = 0; index < lines.length; index += 1) {
+        const item = parseBulkVaultLine(lines[index]!, kindRaw as VaultKind, scope);
+        if (!item.ok) {
+          sendJson(res, 400, { error: `Line ${index + 1}: ${item.error.replace('BULK_LINE: ', '')}` });
+          return true;
+        }
+        parsed.push(item.value);
+      }
+
+      if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+        return true;
+      }
+      await dbInsertVaultItemsBulk(
+        auth.principal.id,
+        parsed.map((item) => ({
+          workspaceId: item.workspaceId,
+          label: item.label,
+          description: item.description,
+          kind: item.kind,
+          username: item.username,
+          url: item.url,
+          secretEncrypted: seal(item.secret),
+          notesEncrypted: seal(item.notes),
+        }))
+      );
+      sendJson(res, 201, { inserted: parsed.length });
       return true;
     }
 
