@@ -113,6 +113,35 @@ export function parseVaultItem(
   };
 }
 
+export const BULK_MAX_LINES = 200;
+
+/**
+ * Parses one `LABEL=secret` line for the dashboard's paste-many import. The
+ * label keeps everything before the first `=` (so `a=b=c` splits label `a`,
+ * secret `b=c`), whitespace is trimmed, and a line with no separator or no
+ * content on either side is refused with the 1-based line number in the
+ * message. The caller supplies the batch-wide kind and workspace.
+ */
+export function parseBulkVaultLine(
+  line: string,
+  kind: VaultKind,
+  workspaceId: string | null
+): { ok: true; value: VaultItemInput } | { ok: false; error: string } {
+  const sep = line.indexOf('=');
+  if (sep === -1) {
+    return { ok: false, error: 'BULK_LINE: each line must be LABEL=secret.' };
+  }
+  const label = line.slice(0, sep).trim();
+  const secret = line.slice(sep + 1).trim();
+  if (!label || !secret) {
+    return { ok: false, error: 'BULK_LINE: each line must be LABEL=secret.' };
+  }
+  return parseVaultItem(
+    { label, description: label, kind, secret },
+    workspaceId
+  );
+}
+
 export interface PresentedVaultItem {
   id: string;
   label: string;

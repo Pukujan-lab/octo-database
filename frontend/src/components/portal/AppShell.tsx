@@ -74,7 +74,7 @@ export function AppShell({
             </div>
           </div>
 
-          <nav className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+          <nav className="flex flex-wrap gap-1 pb-1 lg:flex-col lg:flex-nowrap lg:overflow-visible lg:pb-0">
             {VIEWS.map((view) => {
               const Icon = view.icon;
               const active = view.id === activeView;
