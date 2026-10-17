@@ -2923,6 +2923,17 @@ export async function dbListVaultRoutes(principalId: string, itemId: string): Pr
   );
 }
 
+/** Every route the owner has, for the health pass. */
+export async function dbListVaultRoutesForPrincipal(principalId: string): Promise<VaultRouteRow[]> {
+  return query<VaultRouteRow>(
+    `SELECT ${VAULT_ROUTE_COLUMNS}
+     FROM octo.vault_routes
+     WHERE principal_id = $1
+     ORDER BY created_at ASC`,
+    [principalId]
+  );
+}
+
 export async function dbGetVaultRoute(principalId: string, routeId: string): Promise<VaultRouteRow | null> {
   const rows = await query<VaultRouteRow>(
     `SELECT ${VAULT_ROUTE_COLUMNS}

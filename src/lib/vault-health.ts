@@ -8,6 +8,7 @@
 
 import { ZxcvbnFactory } from '@zxcvbn-ts/core';
 import { adjacencyGraphs, dictionary } from '@zxcvbn-ts/language-common';
+import { buildUpstreamRequest, type RelayRoute } from './relay-egress';
 import { UNCHECKED_STALE_MS, type VaultKind } from './vault-policy';
 
 const passwordChecker = new ZxcvbnFactory({ graphs: adjacencyGraphs, dictionary });
@@ -91,4 +92,28 @@ function ageOut(verdict: HealthVerdict, createdAtMs: number, now: number): Healt
     return { status: 'stale', detail: 'unchecked for 30 days' };
   }
   return verdict;
+}
+
+const PROBE_TEMP_KEY = 'octo_tmp_probe';
+
+/**
+ * Builds the request a route health check sends: the same upstream request the
+ * relay would build, with no caller path or body. Returns null when the scheme
+ * cannot be probed without one (a JSON body field).
+ */
+export function buildRouteProbe(
+  route: RelayRoute & { routeKey: string },
+  secret: string
+): { url: string; headers: Record<string, string> } | null {
+  const built = buildUpstreamRequest({
+    route,
+    secret,
+    tempKey: PROBE_TEMP_KEY,
+    method: 'GET',
+    url: new URL(`http://relay.local/api/vault/relay/${route.routeKey}`),
+    headers: {},
+    body: null,
+  });
+  if ('error' in built) return null;
+  return { url: built.url, headers: built.headers };
 }
