@@ -52,13 +52,29 @@ test.describe('vault relay', () => {
       headers: auth,
       data: {
         name: 'Octo health',
-        baseUrl: UPSTREAM_ORIGIN,
+        // The health pass probes the base URL itself, so point it at a path
+        // that answers 2xx; the relay appends its caller path to this base.
+        baseUrl: `${UPSTREAM_ORIGIN}/health`,
         authScheme: 'bearer',
         confirmSecret: CONFIRM_SECRET,
       },
     });
     expect(route.status()).toBe(201);
     const routeKey = ((await route.json()) as { route: { routeKey: string } }).route.routeKey;
+
+    const healthPass = await request.post('/api/vault/health', {
+      headers: auth,
+      data: { confirmSecret: CONFIRM_SECRET },
+    });
+    expect(healthPass.status()).toBe(200);
+    const checkedRoutes = (
+      (await healthPass.json()) as { checkedRoutes: Array<{ routeKey: string; healthStatus: string }> }
+    ).checkedRoutes;
+    expect(checkedRoutes).toEqual([expect.objectContaining({ routeKey, healthStatus: 'ok' })]);
+
+    const afterHealthPass = await request.get(`/api/vault/items/${itemId}/routes`, { headers: auth });
+    const probed = ((await afterHealthPass.json()) as { routes: Array<{ healthStatus: string }> }).routes;
+    expect(probed[0]?.healthStatus).toBe('ok');
 
     const minted = await request.post('/api/vault/grants', {
       headers: auth,
@@ -75,7 +91,7 @@ test.describe('vault relay', () => {
     const leaseBody = (await lease.json()) as { lease: { id: string }; rawSecret: string };
     const workingKey = leaseBody.rawSecret;
 
-    const relayed = await request.get(`/api/vault/relay/${routeKey}/health`, {
+    const relayed = await request.get(`/api/vault/relay/${routeKey}`, {
       headers: bearer(workingKey),
     });
     expect(relayed.status()).toBe(200);
@@ -90,7 +106,7 @@ test.describe('vault relay', () => {
     });
     expect(wrongRoute.status()).toBe(401);
 
-    const noKey = await request.get(`/api/vault/relay/${routeKey}/health`);
+    const noKey = await request.get(`/api/vault/relay/${routeKey}`);
     expect(noKey.status()).toBe(401);
 
     const revoked = await request.delete(`/api/vault/leases/${leaseBody.lease.id}`, {
@@ -99,7 +115,7 @@ test.describe('vault relay', () => {
     });
     expect(revoked.status()).toBe(200);
 
-    const afterRevoke = await request.get(`/api/vault/relay/${routeKey}/health`, {
+    const afterRevoke = await request.get(`/api/vault/relay/${routeKey}`, {
       headers: bearer(workingKey),
     });
     expect(afterRevoke.status()).toBe(401);
