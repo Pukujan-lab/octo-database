@@ -8,6 +8,7 @@
 
 import { ZxcvbnFactory } from '@zxcvbn-ts/core';
 import { adjacencyGraphs, dictionary } from '@zxcvbn-ts/language-common';
+import { buildUpstreamRequest, type RelayRoute } from './relay-egress';
 import { UNCHECKED_STALE_MS, type VaultKind } from './vault-policy';
 
 const passwordChecker = new ZxcvbnFactory({ graphs: adjacencyGraphs, dictionary });
@@ -91,4 +92,41 @@ function ageOut(verdict: HealthVerdict, createdAtMs: number, now: number): Healt
     return { status: 'stale', detail: 'unchecked for 30 days' };
   }
   return verdict;
+}
+
+/**
+ * A base-URL probe can only prove the host answered: most vendor roots have no
+ * handler and 404. 401/403 still mean the key is bad, and a 5xx or a network
+ * failure means the vendor is not usable.
+ */
+export function classifyRouteProbe(status: number | 'error'): { status: string; detail: string } {
+  if (status === 'error') return { status: 'unreachable', detail: 'host did not answer' };
+  if (status === 401) return { status: 'unauthorized', detail: 'upstream rejected the key (401)' };
+  if (status === 403) return { status: 'forbidden_group', detail: 'key valid but not entitled (403)' };
+  if (status >= 500) return { status: 'unreachable', detail: `upstream ${status}` };
+  return { status: 'ok', detail: `host answered ${status}` };
+}
+
+const PROBE_TEMP_KEY = 'octo_tmp_probe';
+
+/**
+ * Builds the request a route health check sends: the same upstream request the
+ * relay would build, with no caller path or body. Returns null when the scheme
+ * cannot be probed without one (a JSON body field).
+ */
+export function buildRouteProbe(
+  route: RelayRoute & { routeKey: string },
+  secret: string
+): { url: string; headers: Record<string, string> } | null {
+  const built = buildUpstreamRequest({
+    route,
+    secret,
+    tempKey: PROBE_TEMP_KEY,
+    method: 'GET',
+    url: new URL(`http://relay.local/api/vault/relay/${route.routeKey}`),
+    headers: {},
+    body: null,
+  });
+  if ('error' in built) return null;
+  return { url: built.url, headers: built.headers };
 }

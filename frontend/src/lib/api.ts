@@ -37,6 +37,20 @@ const FRIENDLY: Record<string, string> = {
   DESCRIPTION_REQUIRED: "Add a description so an agent can tell this item apart.",
   ITEM_EMPTY: "Add a secret, a username, or a note.",
   NAME_REQUIRED: "Name the grant.",
+  WORKING_KEY_MISSING: "Attach the working key the way this route expects.",
+  WORKING_KEY_INVALID: "That working key is unknown, expired, revoked, or not valid for this route.",
+  WORKING_KEY_AMBIGUOUS: "Send exactly one working key.",
+  LEASE_EXPIRED: "That working key has expired or been revoked.",
+  LEASE_DAYS: "Pick a working-key lifetime from 1 through 30 days.",
+  ROUTE_INVALID: "That route is missing a field its auth scheme needs.",
+  ROUTE_NAME_REQUIRED: "Name the route.",
+  ROUTE_ITEM_INVALID: "Only a token or login with a stored secret can have a route.",
+  ROUTE_KEY_TAKEN: "That route key is already used by another route.",
+  ITEM_REQUIRED: "Name the stored key by label or itemId.",
+  ITEM_NOT_ROUTABLE: "Only a token or login with a stored secret can become a working key.",
+  BODY_TOO_LARGE: "A rewritten body must be 1 MB or smaller.",
+  URL_KIND_INVALID: "Pick a URL kind.",
+  EGRESS_FAILED: "The vendor did not answer.",
 };
 
 type RequestOptions = {
@@ -94,7 +108,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     const raw = body.error ?? res.statusText;
     const sep = raw.indexOf(":");
     const code = sep === -1 ? raw : raw.slice(0, sep);
-    throw new ApiError(FRIENDLY[code] ?? raw, res.status, code);
+    const friendly =
+      FRIENDLY[code] ?? (code.startsWith("EGRESS_") ? "The relay could not complete that call." : raw);
+    throw new ApiError(friendly, res.status, code);
   }
 
   if (res.status === 204) return undefined as T;

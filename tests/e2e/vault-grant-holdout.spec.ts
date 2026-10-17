@@ -148,7 +148,12 @@ test.describe('vault grant holdout', () => {
     await expect(page.getByTestId('view-vault').or(page.getByTestId('app-nav'))).toBeVisible();
     await page.getByRole('button', { name: 'Keys', exact: true }).click();
     await expect(page.getByTestId('view-vault')).toBeVisible();
-    await expect(page.locator('#vault-account-description')).toBeVisible();
+    // The add form starts collapsed once the cabinet has keys.
+    const description = page.locator('#vault-account-description');
+    if (!(await description.isVisible())) {
+      await page.getByTestId('vault-account-add-toggle').click();
+    }
+    await expect(description).toBeVisible();
     const kind = page.locator('#vault-account-kind');
     await kind.click();
     await page.getByRole('option', { name: 'Login' }).click();

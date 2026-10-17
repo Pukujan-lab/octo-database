@@ -21,6 +21,7 @@ import { handlePublicFilesRoutes } from '../routes/public-files';
 import { handleRagRoutes } from '../routes/rag';
 import { handleSharesRoutes } from '../routes/shares';
 import { handleVaultRoutes } from '../routes/vault';
+import { handleVaultRelayRoutes } from '../routes/vault-relay';
 import { handleStaticRoutes } from '../routes/static';
 import { handleWorkspaceQueryRoutes } from '../routes/workspace-query';
 import { handleWorkspacesRoutes } from '../routes/workspaces';
@@ -58,6 +59,9 @@ const ROUTES: RouteHandler[] = [
   handleFilesRoutes,
   handleGalleryRoutes,
   handleKeysRoutes,
+  // Claims every /api/vault path and 404s unknown subpaths, so the relay family
+  // must come first or its routes are never reached.
+  handleVaultRelayRoutes,
   handleVaultRoutes,
   handleSharesRoutes,
   handleCapabilitiesRoutes,
@@ -76,7 +80,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key',
     });
     res.end();
     return;
