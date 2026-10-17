@@ -3102,6 +3102,27 @@ export async function dbRenewVaultLease(keyHash: string, days: number): Promise<
   return rows[0]?.expiresAt ?? null;
 }
 
+/** Introspection for the holder of a working key. Service path: no session. */
+export async function dbGetVaultLeaseByKey(keyHash: string): Promise<VaultLeaseRow | null> {
+  const rows = await queryService<VaultLeaseRow>(
+    `SELECT l.id,
+            l.item_id AS "itemId",
+            i.label AS "itemLabel",
+            l.parent_grant_id AS "parentGrantId",
+            l.prefix,
+            l.name,
+            l.expires_at AS "expiresAt",
+            l.revoked_at AS "revokedAt",
+            l.created_at AS "createdAt",
+            l.last_used_at AS "lastUsedAt"
+     FROM octo.vault_leases l
+     JOIN octo.vault_items i ON i.id = l.item_id
+     WHERE l.key_hash = $1 AND l.revoked_at IS NULL AND l.expires_at > now()`,
+    [keyHash]
+  );
+  return rows[0] ?? null;
+}
+
 export interface ConsumedVaultLease {
   leaseId: string;
   principalId: string;
