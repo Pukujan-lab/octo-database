@@ -11,7 +11,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { getPublicOrigin } from '../lib/public-origin';
 import { hashApiKeySecret } from '../lib/secret-hash';
 import { decryptSecret, encryptSecret } from '../lib/mfa';
-import { checkVaultItem } from '../lib/vault-health';
+import { classifyUpstream } from '../lib/relay-egress';
+import { buildRouteProbe, checkVaultItem } from '../lib/vault-health';
 import {
   BULK_MAX_LINES,
   grantExpiresAt,
@@ -51,9 +52,11 @@ import {
   dbListVaultRoutes,
   dbListVaultRoutesForCabinet,
   dbListVaultRoutesForGrant,
+  dbListVaultRoutesForPrincipal,
   dbPurgeStaleVaultItems,
   dbRevokeVaultLease,
   dbUpdateVaultHealth,
+  dbUpdateVaultRouteHealth,
   type VaultItemRow,
   type VaultRouteRow,
 } from '../server/db';
@@ -519,9 +522,45 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
         await dbUpdateVaultHealth(auth.principal.id, item.id, verdict.status, verdict.detail);
         checked.push({ id: item.id, healthStatus: verdict.status, healthDetail: verdict.detail });
       }
+
+      // Routes are probed with the same request the relay would send, so the
+      // answer reflects what an agent would actually get back from the vendor.
+      const byItem = new Map(items.map((item) => [item.id, item]));
+      const routes = await dbListVaultRoutesForPrincipal(auth.principal.id);
+      const checkedRoutes: Array<{ id: string; routeKey: string; healthStatus: string; healthDetail: string }> = [];
+      for (const route of routes) {
+        const item = byItem.get(route.itemId);
+        if (!item) continue;
+        const secret = openSeal(item.secretEncrypted);
+        if (!secret) continue;
+        const request = buildRouteProbe(
+          {
+            baseUrl: route.baseUrl,
+            authScheme: route.authScheme,
+            authHeader: route.authHeader,
+            bodyField: route.bodyField,
+            basicUsername: route.basicUsername,
+            itemUsername: item.username,
+            routeKey: route.routeKey,
+          },
+          secret
+        );
+        // A body_json route only proves itself when a caller sends a body.
+        if (!request) continue;
+        const status = await liveProbe(request.url, request.headers, 'GET');
+        const health = classifyUpstream(status);
+        await dbUpdateVaultRouteHealth(auth.principal.id, route.id, health.status, health.detail);
+        checkedRoutes.push({
+          id: route.id,
+          routeKey: route.routeKey,
+          healthStatus: health.status,
+          healthDetail: health.detail,
+        });
+      }
+
       const cutoff = new Date(Date.now() - STALE_PURGE_MS).toISOString();
       const purged = await dbPurgeStaleVaultItems(auth.principal.id, cutoff);
-      sendJson(res, 200, { checked, purged });
+      sendJson(res, 200, { checked, checkedRoutes, purged });
       return true;
     }
 
