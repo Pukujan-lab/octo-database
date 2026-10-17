@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { KeyRound, ShieldAlert } from "lucide-react";
 import { Panel, StatusPill, type PillTone } from "@/components/portal/Panel";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useConfirmChallenge } from "@/hooks/useConfirmChallenge";
 import { api, errorMessage, isConfirmSecretMissing } from "@/lib/api";
 import type { MeResponse, Workspace } from "@/lib/types";
@@ -61,6 +62,7 @@ export function VaultView({
   const challenge = useConfirmChallenge(true);
   const [typed, setTyped] = useState("");
   const [mfaCode, setMfaCode] = useState("");
+  const [codeUsed, setCodeUsed] = useState(false);
   const [rawSecret, setRawSecret] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<{ label: string; secret: string | null; notes: string | null } | null>(null);
 
@@ -88,7 +90,8 @@ export function VaultView({
   function afterGate() {
     setTyped("");
     setMfaCode("");
-    challenge.refresh();
+    setCodeUsed(true);
+    void challenge.refresh().finally(() => setCodeUsed(false));
   }
 
   function onGateError(error: unknown) {
@@ -106,13 +109,22 @@ export function VaultView({
   return (
     <div data-testid="view-vault" className="animate-fade-rise space-y-6">
       <Panel eyebrow="Cabinet" title="Keys">
-        <div className="space-y-3 p-5 text-sm leading-relaxed text-muted-foreground">
-          <p>
-            Drop a login, token, URL, or note here. Account keys stay with you. Workspace keys stay on the workspace you assign.
-            At an event, mint a temporary grant and hand that to an agent. The grant reads one cabinet. The agent can ask for a decoy grant that answers the same way and never returns the stored secret.
+        <p className="p-5 text-sm leading-relaxed text-muted-foreground">
+          Drop a login, token, URL, or note here. Account keys stay with you. Workspace keys stay on the workspace you assign.
+          At an event, mint a temporary grant and hand that to an agent. The grant reads one cabinet. The agent can ask for a decoy grant that answers the same way and never returns the stored secret.
+        </p>
+      </Panel>
+
+      <Panel eyebrow="Gate" title="Confirm each change">
+        <div className="space-y-3 p-5">
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Every save, import, mint, remove and revoke on this page uses the code below. It is
+            single-use, so a fresh one is issued as soon as you use it.
           </p>
           <ConfirmGate
             code={challenge.code}
+            expiresAt={challenge.expiresAt}
+            used={codeUsed}
             loading={challenge.loading}
             error={challenge.error}
             onRefresh={challenge.refresh}
@@ -380,6 +392,43 @@ function Cabinet({
   const [secret, setSecret] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const filtered = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    if (!needle) return items;
+    return items.filter((item) =>
+      `${item.label} ${item.description}`.toLowerCase().includes(needle),
+    );
+  }, [items, filter]);
+
+  const bulkLines = bulkText.split("\n").map((line) => line.trim()).filter(Boolean);
+
+  async function importMany() {
+    if (bulkLines.length === 0) {
+      toast.error("Paste at least one LABEL=secret line");
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const result = await api.post<{ inserted: number }>("/api/vault/items/bulk", {
+        lines: bulkLines,
+        kind,
+        workspaceId,
+        ...gate(),
+      });
+      setBulkText("");
+      toast.success(`Imported ${result.inserted} key${result.inserted === 1 ? "" : "s"}`);
+      onSaved();
+    } catch (caught) {
+      onError(caught);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   async function save() {
     setBusy(true);
@@ -476,6 +525,52 @@ function Cabinet({
           </div>
         )}
 
+        {!disabled ? (
+          <div className="rounded-md border border-border">
+            <button
+              type="button"
+              data-testid={`${idPrefix}-bulk-toggle`}
+              onClick={() => setBulkOpen((open) => !open)}
+              className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              <span>Paste many — one key per line</span>
+              <span>{bulkOpen ? "hide" : "open"}</span>
+            </button>
+            {bulkOpen ? (
+              <div className="space-y-2 border-t border-border p-3">
+                <Textarea
+                  data-testid={`${idPrefix}-bulk`}
+                  value={bulkText}
+                  onChange={(event) => setBulkText(event.target.value)}
+                  rows={5}
+                  spellCheck={false}
+                  placeholder={"Cloudflare=cf-token\nGitHub=ghp_xxxx"}
+                  className="num bg-background text-xs"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    LABEL=secret per line, saved as {kind}. The description is set to the label.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="ml-auto h-8 text-xs"
+                    data-testid={`${idPrefix}-bulk-import`}
+                    disabled={bulkBusy || bulkLines.length === 0}
+                    onClick={() => void importMany()}
+                  >
+                    {bulkBusy
+                      ? "Importing…"
+                      : bulkLines.length === 0
+                        ? "Import keys"
+                        : `Import ${bulkLines.length} key${bulkLines.length === 1 ? "" : "s"}`}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {error ? (
           <EmptyState title="Could not load keys" description={error} action={<Button onClick={onRetry}>Retry</Button>} />
         ) : loading ? (
@@ -483,50 +578,74 @@ function Cabinet({
         ) : items.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing stored here yet.</p>
         ) : (
-          <ul className="space-y-2">
-            {items.map((item) => (
-              <li key={item.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
-                <span className="font-medium">{item.label}</span>
-                <span className="w-full text-xs text-muted-foreground">{item.description}</span>
-                <StatusPill tone="muted">{item.kind}</StatusPill>
-                <StatusPill tone={HEALTH_TONE[item.healthStatus]}>{item.healthStatus}</StatusPill>
-                {item.healthDetail ? <span className="text-xs text-muted-foreground">{item.healthDetail}</span> : null}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="ml-auto h-7 text-xs"
-                  onClick={async () => {
-                    try {
-                      const result = await api.get<{ item: { label: string; secret: string | null; notes: string | null } }>(
-                        `/api/vault/items/${item.id}`,
-                      );
-                      onReveal({ label: result.item.label, secret: result.item.secret, notes: result.item.notes });
-                    } catch (caught) {
-                      onError(caught);
-                    }
-                  }}
-                >
-                  Show
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-xs"
-                  onClick={async () => {
-                    try {
-                      await api.del(`/api/vault/items/${item.id}`, gate());
-                      toast.success("Removed");
-                      onSaved();
-                    } catch (caught) {
-                      onError(caught);
-                    }
-                  }}
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-2">
+            <Input
+              data-testid={`${idPrefix}-filter`}
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder={`Filter ${items.length} key${items.length === 1 ? "" : "s"}`}
+              className="h-8 bg-background text-sm"
+              aria-label="Filter keys"
+            />
+            {filtered.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No keys match “{filter}”.{" "}
+                <button type="button" className="underline underline-offset-2" onClick={() => setFilter("")}>
+                  Clear
+                </button>
+              </p>
+            ) : (
+              <ul className="space-y-1" data-testid={`${idPrefix}-items`}>
+                {filtered.map((item) => (
+                  <li key={item.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-1.5">
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      <span className="font-medium">{item.label}</span>
+                      {item.description && item.description !== item.label ? (
+                        <span className="ml-2 text-xs text-muted-foreground">{item.description}</span>
+                      ) : null}
+                    </span>
+                    <StatusPill tone="muted">{item.kind}</StatusPill>
+                    <span title={item.healthDetail ?? undefined}>
+                      <StatusPill tone={HEALTH_TONE[item.healthStatus]}>{item.healthStatus}</StatusPill>
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs"
+                      onClick={async () => {
+                        try {
+                          const result = await api.get<{ item: { label: string; secret: string | null; notes: string | null } }>(
+                            `/api/vault/items/${item.id}`,
+                          );
+                          onReveal({ label: result.item.label, secret: result.item.secret, notes: result.item.notes });
+                        } catch (caught) {
+                          onError(caught);
+                        }
+                      }}
+                    >
+                      Show
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs"
+                      onClick={async () => {
+                        try {
+                          await api.del(`/api/vault/items/${item.id}`, gate());
+                          toast.success("Removed");
+                          onSaved();
+                        } catch (caught) {
+                          onError(caught);
+                        }
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </div>
     </Panel>
