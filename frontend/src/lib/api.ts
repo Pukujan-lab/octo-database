@@ -27,6 +27,12 @@ const FRIENDLY: Record<string, string> = {
   GOOGLE_AUTH_NOT_CONFIGURED: "Google sign-in is not configured on this server.",
   JOB_TYPE_RESERVED: "That job type is reserved — use the archive or restore action instead.",
   SESSION_EXPIRED: "Your session expired. Please sign in again.",
+  VAULT_NOT_CONFIGURED: "The vault envelope key is not set on this server.",
+  GRANT_HOURS: "Pick a lifetime from 5 hours through 3 days.",
+  LABEL_REQUIRED: "Name the key.",
+  DESCRIPTION_REQUIRED: "Add a description so an agent can tell this item apart.",
+  ITEM_EMPTY: "Add a secret, a username, or a note.",
+  NAME_REQUIRED: "Name the grant.",
 };
 
 type RequestOptions = {

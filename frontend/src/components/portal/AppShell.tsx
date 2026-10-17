@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Hexagon,
   Images,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Plus,
@@ -17,7 +18,7 @@ import {
   Workflow,
 } from "lucide-react";
 
-export type ViewId = "overview" | "files" | "gallery" | "operations" | "access";
+export type ViewId = "overview" | "files" | "gallery" | "operations" | "access" | "vault";
 
 export const VIEWS: Array<{ id: ViewId; label: string; icon: typeof LayoutDashboard }> = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -25,6 +26,7 @@ export const VIEWS: Array<{ id: ViewId; label: string; icon: typeof LayoutDashbo
   { id: "gallery", label: "Gallery", icon: Images },
   { id: "operations", label: "Operations", icon: Workflow },
   { id: "access", label: "Access", icon: Shield },
+  { id: "vault", label: "Keys", icon: KeyRound },
 ];
 
 export function AppShell({

@@ -15,6 +15,7 @@ import { FilesView } from "@/views/FilesView";
 import { GalleryView } from "@/views/GalleryView";
 import { OperationsView } from "@/views/OperationsView";
 import { AccessView } from "@/views/AccessView";
+import { VaultView } from "@/views/VaultView";
 import type { DeleteWorkspaceResult } from "@/lib/types";
 
 export default function Index() {
@@ -134,15 +135,17 @@ export default function Index() {
               <div className="h-4 w-56 animate-pulse rounded bg-muted" />
             </div>
           </Panel>
-        ) : !workspace ? (
+        ) : !workspace && view !== "vault" ? (
           <Panel>
             <EmptyState
               title="No workspaces yet"
-              description="Create your first workspace to start storing files, media and jobs. Creating one is gated behind a confirmation code."
+              description="Create your first workspace to start storing files, media and jobs. Creating one is gated behind a confirmation code. Account keys can be stored from Keys before a workspace exists."
               action={<Button onClick={() => setCreateOpen(true)}>+ New Workspace</Button>}
             />
           </Panel>
-        ) : (
+        ) : view === "vault" ? (
+          <VaultView workspace={workspace} me={session.me} />
+        ) : !workspace ? null : (
           <>
             {data.failedSections.length && view !== "overview" ? (
               <div className="panel mb-6 border-warning/45 bg-warning/8 px-5 py-3 text-sm text-warning">

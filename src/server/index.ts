@@ -20,6 +20,7 @@ import { handleOpsRoutes } from '../routes/ops';
 import { handlePublicFilesRoutes } from '../routes/public-files';
 import { handleRagRoutes } from '../routes/rag';
 import { handleSharesRoutes } from '../routes/shares';
+import { handleVaultRoutes } from '../routes/vault';
 import { handleStaticRoutes } from '../routes/static';
 import { handleWorkspaceQueryRoutes } from '../routes/workspace-query';
 import { handleWorkspacesRoutes } from '../routes/workspaces';
@@ -57,6 +58,7 @@ const ROUTES: RouteHandler[] = [
   handleFilesRoutes,
   handleGalleryRoutes,
   handleKeysRoutes,
+  handleVaultRoutes,
   handleSharesRoutes,
   handleCapabilitiesRoutes,
   handleJobsRoutes,
