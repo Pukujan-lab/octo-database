@@ -2563,3 +2563,275 @@ export async function dbHasOpenFileJob(
   );
   return rows[0]?.open ?? false;
 }
+
+// --- Vault cabinet -----------------------------------------------------------
+
+export interface VaultItemRow {
+  id: string;
+  workspaceId: string | null;
+  label: string;
+  description: string;
+  kind: 'login' | 'token' | 'url' | 'note';
+  username: string | null;
+  url: string | null;
+  secretEncrypted: string | null;
+  notesEncrypted: string | null;
+  healthStatus: 'unchecked' | 'healthy' | 'weak' | 'stale';
+  healthDetail: string | null;
+  lastHealthAt: string | null;
+  staleSince: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VaultGrantRow {
+  id: string;
+  workspaceId: string | null;
+  parentGrantId: string | null;
+  prefix: string;
+  name: string;
+  decoy: boolean;
+  expiresAt: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  trippedAt: string | null;
+}
+
+const VAULT_ITEM_COLUMNS = `
+  id,
+  workspace_id AS "workspaceId",
+  label,
+  description,
+  kind,
+  username,
+  url,
+  secret_encrypted AS "secretEncrypted",
+  notes_encrypted AS "notesEncrypted",
+  health_status AS "healthStatus",
+  health_detail AS "healthDetail",
+  last_health_at AS "lastHealthAt",
+  stale_since AS "staleSince",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt"
+`;
+
+export async function dbListVaultItems(principalId: string): Promise<VaultItemRow[]> {
+  return query<VaultItemRow>(
+    `SELECT ${VAULT_ITEM_COLUMNS}
+     FROM octo.vault_items
+     WHERE principal_id = $1
+     ORDER BY created_at DESC`,
+    [principalId]
+  );
+}
+
+export async function dbGetVaultItem(principalId: string, itemId: string): Promise<VaultItemRow | null> {
+  const rows = await query<VaultItemRow>(
+    `SELECT ${VAULT_ITEM_COLUMNS}
+     FROM octo.vault_items
+     WHERE principal_id = $1 AND id = $2`,
+    [principalId, itemId]
+  );
+  return rows[0] ?? null;
+}
+
+export async function dbInsertVaultItem(input: {
+  id: string;
+  principalId: string;
+  workspaceId: string | null;
+  label: string;
+  description: string;
+  kind: string;
+  username: string | null;
+  url: string | null;
+  secretEncrypted: string | null;
+  notesEncrypted: string | null;
+}): Promise<void> {
+  await query(
+    `INSERT INTO octo.vault_items (
+       id, principal_id, workspace_id, label, description, kind, username, url, secret_encrypted, notes_encrypted
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      input.id,
+      input.principalId,
+      input.workspaceId,
+      input.label,
+      input.description,
+      input.kind,
+      input.username,
+      input.url,
+      input.secretEncrypted,
+      input.notesEncrypted,
+    ]
+  );
+}
+
+export async function dbDeleteVaultItem(principalId: string, itemId: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    'DELETE FROM octo.vault_items WHERE principal_id = $1 AND id = $2 RETURNING id',
+    [principalId, itemId]
+  );
+  return rows.length > 0;
+}
+
+export async function dbUpdateVaultHealth(
+  principalId: string,
+  itemId: string,
+  status: string,
+  detail: string
+): Promise<void> {
+  await query(
+    `UPDATE octo.vault_items
+     SET health_status = $3,
+         health_detail = $4,
+         last_health_at = now(),
+         stale_since = CASE WHEN $3 = 'stale' THEN COALESCE(stale_since, now()) ELSE NULL END,
+         updated_at = now()
+     WHERE principal_id = $1 AND id = $2`,
+    [principalId, itemId, status, detail]
+  );
+}
+
+/** Removes items that have been stale since before `cutoff`. */
+export async function dbPurgeStaleVaultItems(principalId: string, cutoffIso: string): Promise<number> {
+  const rows = await query<{ id: string }>(
+    `DELETE FROM octo.vault_items
+     WHERE principal_id = $1
+       AND health_status = 'stale'
+       AND stale_since IS NOT NULL
+       AND stale_since < $2::timestamptz
+     RETURNING id`,
+    [principalId, cutoffIso]
+  );
+  return rows.length;
+}
+
+export async function dbListVaultGrants(principalId: string): Promise<VaultGrantRow[]> {
+  return query<VaultGrantRow>(
+    `SELECT id,
+            workspace_id AS "workspaceId",
+            parent_grant_id AS "parentGrantId",
+            prefix,
+            name,
+            decoy,
+            expires_at AS "expiresAt",
+            created_at AS "createdAt",
+            last_used_at AS "lastUsedAt",
+            tripped_at AS "trippedAt"
+     FROM octo.vault_grants
+     WHERE principal_id = $1
+     ORDER BY created_at DESC`,
+    [principalId]
+  );
+}
+
+export async function dbInsertVaultGrant(input: {
+  id: string;
+  principalId: string;
+  workspaceId: string | null;
+  parentGrantId: string | null;
+  keyHash: string;
+  prefix: string;
+  name: string;
+  decoy: boolean;
+  expiresAt: string;
+}): Promise<void> {
+  await query(
+    `INSERT INTO octo.vault_grants (
+       id, principal_id, workspace_id, parent_grant_id, key_hash, prefix, name, decoy, expires_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      input.id,
+      input.principalId,
+      input.workspaceId,
+      input.parentGrantId,
+      input.keyHash,
+      input.prefix,
+      input.name,
+      input.decoy,
+      input.expiresAt,
+    ]
+  );
+}
+
+/**
+ * Inserts a decoy grant minted by an agent. The agent has no session, so this
+ * uses the service pool and copies the cabinet from the parent grant. The
+ * caller has already verified that parent.
+ */
+export async function dbInsertVaultGrantService(input: {
+  id: string;
+  principalId: string;
+  workspaceId: string | null;
+  parentGrantId: string;
+  keyHash: string;
+  prefix: string;
+  name: string;
+  expiresAt: string;
+}): Promise<void> {
+  await queryService(
+    `INSERT INTO octo.vault_grants (
+       id, principal_id, workspace_id, parent_grant_id, key_hash, prefix, name, decoy, expires_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)`,
+    [
+      input.id,
+      input.principalId,
+      input.workspaceId,
+      input.parentGrantId,
+      input.keyHash,
+      input.prefix,
+      input.name,
+      input.expiresAt,
+    ]
+  );
+}
+
+export async function dbDeleteVaultGrant(principalId: string, grantId: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    'DELETE FROM octo.vault_grants WHERE principal_id = $1 AND id = $2 RETURNING id',
+    [principalId, grantId]
+  );
+  return rows.length > 0;
+}
+
+export interface ConsumedVaultGrant {
+  grantId: string;
+  principalId: string;
+  workspaceId: string | null;
+  prefix: string;
+  grantName: string;
+  decoy: boolean;
+  expiresAt: string;
+  trippedAt: string | null;
+}
+
+export async function dbConsumeVaultGrant(keyHash: string): Promise<ConsumedVaultGrant | null> {
+  const rows = await queryService<ConsumedVaultGrant>(
+    `SELECT grant_id AS "grantId",
+            principal_id AS "principalId",
+            workspace_id AS "workspaceId",
+            prefix,
+            grant_name AS "grantName",
+            decoy,
+            expires_at AS "expiresAt",
+            tripped_at AS "trippedAt"
+     FROM octo.consume_vault_grant($1)`,
+    [keyHash]
+  );
+  return rows[0] ?? null;
+}
+
+/** Items in the cabinet a grant is allowed to read. Service path: no session. */
+export async function dbListVaultItemsForGrant(
+  principalId: string,
+  workspaceId: string | null
+): Promise<VaultItemRow[]> {
+  return queryService<VaultItemRow>(
+    `SELECT ${VAULT_ITEM_COLUMNS}
+     FROM octo.vault_items
+     WHERE principal_id = $1
+       AND workspace_id IS NOT DISTINCT FROM $2::uuid
+     ORDER BY label ASC`,
+    [principalId, workspaceId]
+  );
+}

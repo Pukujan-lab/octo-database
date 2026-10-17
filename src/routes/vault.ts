@@ -1,0 +1,394 @@
+/**
+ * Password-manager cabinet and the temporary grant an agent pastes.
+ *
+ * Stored secrets use the AES-256-GCM envelope already used for TOTP seeds and
+ * workspace database passwords (OCTO_MFA_SECRET). Grant tokens are hashed with
+ * the same SHA-256 used for API keys. A grant is not an API key: it cannot
+ * call the rest of Octo, and an API key cannot mint one.
+ */
+
+import { randomBytes, randomUUID } from 'node:crypto';
+import { hashApiKeySecret } from '../lib/secret-hash';
+import { decryptSecret, encryptSecret } from '../lib/mfa';
+import { checkVaultItem } from '../lib/vault-health';
+import {
+  grantExpiresAt,
+  parseGrantHours,
+  parseVaultItem,
+  presentVaultItem,
+  STALE_PURGE_MS,
+  type VaultKind,
+} from '../lib/vault-policy';
+import { authenticateRequest } from '../server/auth-context';
+import { confirmGate } from '../server/confirm';
+import {
+  dbConsumeVaultGrant,
+  dbDeleteVaultGrant,
+  dbDeleteVaultItem,
+  dbGetVaultItem,
+  dbGetWorkspaceMembership,
+  dbInsertVaultGrant,
+  dbInsertVaultGrantService,
+  dbInsertVaultItem,
+  dbListVaultGrants,
+  dbListVaultItems,
+  dbListVaultItemsForGrant,
+  dbPurgeStaleVaultItems,
+  dbUpdateVaultHealth,
+  type VaultItemRow,
+} from '../server/db';
+import { readJsonObject, requireUuid, sendJson, type RouteHandler } from '../server/http';
+import { UUID_PATTERN } from '../server/runtime';
+import type { IncomingMessage, ServerResponse } from 'http';
+
+const GRANT_PREFIX = 'octo_vault_';
+
+function bearer(req: IncomingMessage): string | null {
+  const header = req.headers['authorization'];
+  if (!header?.startsWith('Bearer ')) return null;
+  const token = header.slice(7).trim();
+  return token || null;
+}
+
+function vaultConfiguredError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith('MFA_NOT_CONFIGURED');
+}
+
+function sendVaultUnavailable(res: ServerResponse): void {
+  sendJson(res, 503, {
+    error: 'VAULT_NOT_CONFIGURED: OCTO_MFA_SECRET is required to seal vault items.',
+  });
+}
+
+function seal(value: string | null): string | null {
+  if (!value) return null;
+  return encryptSecret(value);
+}
+
+function openSeal(value: string | null): string | null {
+  if (!value) return null;
+  return decryptSecret(value);
+}
+
+function publicItem(row: VaultItemRow) {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    label: row.label,
+    description: row.description,
+    kind: row.kind,
+    username: row.username,
+    url: row.url,
+    hasSecret: Boolean(row.secretEncrypted),
+    hasNotes: Boolean(row.notesEncrypted),
+    healthStatus: row.healthStatus,
+    healthDetail: row.healthDetail,
+    lastHealthAt: row.lastHealthAt,
+    staleSince: row.staleSince,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function agentItem(row: VaultItemRow, grantId: string, decoy: boolean) {
+  return presentVaultItem({
+    id: row.id,
+    label: row.label,
+    description: row.description,
+    kind: row.kind,
+    username: row.username,
+    url: row.url,
+    secret: openSeal(row.secretEncrypted),
+    notes: openSeal(row.notesEncrypted),
+    healthStatus: row.healthStatus,
+    grantId,
+    decoy,
+  });
+}
+
+function mintToken(): { raw: string; hash: string; prefix: string } {
+  const raw = `${GRANT_PREFIX}${randomBytes(32).toString('base64url')}`;
+  return { raw, hash: hashApiKeySecret(raw), prefix: raw.slice(0, 18) };
+}
+
+async function workspaceAllowed(
+  res: ServerResponse,
+  principalId: string,
+  workspaceId: string | null
+): Promise<boolean> {
+  if (!workspaceId) return true;
+  if (!UUID_PATTERN.test(workspaceId)) {
+    sendJson(res, 400, { error: 'INVALID_WORKSPACE_ID: workspaceId must be a UUID.' });
+    return false;
+  }
+  const membership = await dbGetWorkspaceMembership(workspaceId, principalId);
+  if (!membership) {
+    sendJson(res, 403, { error: 'FORBIDDEN: that workspace is not on this account.' });
+    return false;
+  }
+  return true;
+}
+
+export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
+  const path = url.pathname;
+  if (!path.startsWith('/api/vault')) return false;
+
+  try {
+    if (path === '/api/vault/open' && req.method === 'GET') return openCabinet(req, res);
+    if (path === '/api/vault/open/decoy' && req.method === 'POST') return mintDecoy(req, res);
+
+    const auth = await authenticateRequest(req);
+    if (!auth) {
+      sendJson(res, 401, { error: 'UNAUTHORIZED: sign in to use the vault.' });
+      return true;
+    }
+    if (auth.apiKey) {
+      sendJson(res, 403, { error: 'FORBIDDEN: an API key cannot open the vault. Mint a vault grant from the dashboard.' });
+      return true;
+    }
+
+    if (path === '/api/vault/items' && req.method === 'GET') {
+      const items = await dbListVaultItems(auth.principal.id);
+      sendJson(res, 200, { items: items.map(publicItem) });
+      return true;
+    }
+
+    if (path === '/api/vault/items' && req.method === 'POST') {
+      const body = await readJsonObject(req);
+      if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+        return true;
+      }
+      const workspaceId = body['workspaceId'];
+      const scope = workspaceId === undefined || workspaceId === null || workspaceId === '' ? null : String(workspaceId);
+      if (!(await workspaceAllowed(res, auth.principal.id, scope))) return true;
+      const parsed = parseVaultItem(body, scope);
+      if (!parsed.ok) {
+        sendJson(res, 400, { error: parsed.error });
+        return true;
+      }
+      const id = randomUUID();
+      await dbInsertVaultItem({
+        id,
+        principalId: auth.principal.id,
+        workspaceId: parsed.value.workspaceId,
+        label: parsed.value.label,
+        description: parsed.value.description,
+        kind: parsed.value.kind,
+        username: parsed.value.username,
+        url: parsed.value.url,
+        secretEncrypted: seal(parsed.value.secret),
+        notesEncrypted: seal(parsed.value.notes),
+      });
+      const created = await dbGetVaultItem(auth.principal.id, id);
+      sendJson(res, 201, { item: created ? publicItem(created) : { id } });
+      return true;
+    }
+
+    const itemMatch = path.match(/^\/api\/vault\/items\/([^/]+)$/);
+    if (itemMatch) {
+      const itemId = itemMatch[1] ?? '';
+      if (!requireUuid(res, itemId, 'itemId')) return true;
+      if (req.method === 'GET') {
+        const row = await dbGetVaultItem(auth.principal.id, itemId);
+        if (!row) {
+          sendJson(res, 404, { error: 'NOT_FOUND: no vault item with that id.' });
+          return true;
+        }
+        sendJson(res, 200, {
+          item: {
+            ...publicItem(row),
+            secret: openSeal(row.secretEncrypted),
+            notes: openSeal(row.notesEncrypted),
+          },
+        });
+        return true;
+      }
+      if (req.method === 'DELETE') {
+        const body = await readJsonObject(req);
+        if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+          return true;
+        }
+        const removed = await dbDeleteVaultItem(auth.principal.id, itemId);
+        if (!removed) {
+          sendJson(res, 404, { error: 'NOT_FOUND: no vault item with that id.' });
+          return true;
+        }
+        sendJson(res, 200, { deleted: itemId });
+        return true;
+      }
+    }
+
+    if (path === '/api/vault/grants' && req.method === 'GET') {
+      const grants = await dbListVaultGrants(auth.principal.id);
+      sendJson(res, 200, { grants });
+      return true;
+    }
+
+    if (path === '/api/vault/grants' && req.method === 'POST') {
+      const body = await readJsonObject(req);
+      if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+        return true;
+      }
+      const name = typeof body['name'] === 'string' ? body['name'].trim() : '';
+      if (!name || name.length > 200) {
+        sendJson(res, 400, { error: 'NAME_REQUIRED: name the grant.' });
+        return true;
+      }
+      const hours = parseGrantHours(body['expiresInHours']);
+      if (!hours.ok) {
+        sendJson(res, 400, { error: hours.error });
+        return true;
+      }
+      const workspaceId = body['workspaceId'];
+      const scope = workspaceId === undefined || workspaceId === null || workspaceId === '' ? null : String(workspaceId);
+      if (!(await workspaceAllowed(res, auth.principal.id, scope))) return true;
+      const token = mintToken();
+      const id = randomUUID();
+      const expiresAt = grantExpiresAt(hours.hours);
+      await dbInsertVaultGrant({
+        id,
+        principalId: auth.principal.id,
+        workspaceId: scope,
+        parentGrantId: null,
+        keyHash: token.hash,
+        prefix: token.prefix,
+        name,
+        decoy: false,
+        expiresAt,
+      });
+      sendJson(res, 201, {
+        grant: { id, name, prefix: token.prefix, workspaceId: scope, decoy: false, expiresAt },
+        rawSecret: token.raw,
+      });
+      return true;
+    }
+
+    const grantMatch = path.match(/^\/api\/vault\/grants\/([^/]+)$/);
+    if (grantMatch && req.method === 'DELETE') {
+      const grantId = grantMatch[1] ?? '';
+      if (!requireUuid(res, grantId, 'grantId')) return true;
+      const body = await readJsonObject(req);
+      if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+        return true;
+      }
+      const removed = await dbDeleteVaultGrant(auth.principal.id, grantId);
+      if (!removed) {
+        sendJson(res, 404, { error: 'NOT_FOUND: no vault grant with that id.' });
+        return true;
+      }
+      sendJson(res, 200, { deleted: grantId });
+      return true;
+    }
+
+    if (path === '/api/vault/health' && req.method === 'POST') {
+      const body = await readJsonObject(req);
+      if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+        return true;
+      }
+      const items = await dbListVaultItems(auth.principal.id);
+      const checked: Array<{ id: string; healthStatus: string; healthDetail: string }> = [];
+      for (const item of items) {
+        const secret = openSeal(item.secretEncrypted);
+        const verdict = await checkVaultItem(
+          {
+            kind: item.kind as VaultKind,
+            url: item.url,
+            createdAtMs: Date.parse(item.createdAt),
+          },
+          secret,
+          liveProbe
+        );
+        await dbUpdateVaultHealth(auth.principal.id, item.id, verdict.status, verdict.detail);
+        checked.push({ id: item.id, healthStatus: verdict.status, healthDetail: verdict.detail });
+      }
+      const cutoff = new Date(Date.now() - STALE_PURGE_MS).toISOString();
+      const purged = await dbPurgeStaleVaultItems(auth.principal.id, cutoff);
+      sendJson(res, 200, { checked, purged });
+      return true;
+    }
+
+    sendJson(res, 404, { error: 'NOT_FOUND: no vault route at that path.' });
+    return true;
+  } catch (error) {
+    if (vaultConfiguredError(error)) {
+      sendVaultUnavailable(res);
+      return true;
+    }
+    throw error;
+  }
+};
+
+async function liveProbe(url: string, headers: Record<string, string>, method: 'GET' | 'HEAD'): Promise<number | 'error'> {
+  try {
+    const response = await fetch(url, {
+      method,
+      headers,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(4000),
+    });
+    return response.status;
+  } catch {
+    return 'error';
+  }
+}
+
+async function loadGrant(req: IncomingMessage, res: ServerResponse) {
+  const token = bearer(req);
+  if (!token?.startsWith(GRANT_PREFIX)) {
+    sendJson(res, 401, { error: 'UNAUTHORIZED: paste a vault grant.' });
+    return null;
+  }
+  const grant = await dbConsumeVaultGrant(hashApiKeySecret(token));
+  if (!grant) {
+    sendJson(res, 401, { error: 'UNAUTHORIZED: that vault grant is expired or unknown.' });
+    return null;
+  }
+  return grant;
+}
+
+async function openCabinet(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  const grant = await loadGrant(req, res);
+  if (!grant) return true;
+  const rows = await dbListVaultItemsForGrant(grant.principalId, grant.workspaceId);
+  sendJson(res, 200, {
+    cabinet: grant.workspaceId ? 'workspace' : 'account',
+    workspaceId: grant.workspaceId,
+    expiresAt: grant.expiresAt,
+    items: rows.map((row) => agentItem(row, grant.grantId, grant.decoy)),
+  });
+  return true;
+}
+
+async function mintDecoy(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  const grant = await loadGrant(req, res);
+  if (!grant) return true;
+  const body = await readJsonObject(req);
+  const hours = parseGrantHours(body['expiresInHours']);
+  if (!hours.ok) {
+    sendJson(res, 400, { error: hours.error });
+    return true;
+  }
+  const token = mintToken();
+  const id = randomUUID();
+  const expiresAt = grantExpiresAt(hours.hours);
+  await dbInsertVaultGrantService({
+    id,
+    principalId: grant.principalId,
+    workspaceId: grant.workspaceId,
+    parentGrantId: grant.grantId,
+    keyHash: token.hash,
+    prefix: token.prefix,
+    name: `${grant.grantName} decoy`,
+    expiresAt,
+  });
+  sendJson(res, 201, {
+    grant: {
+      id,
+      prefix: token.prefix,
+      workspaceId: grant.workspaceId,
+      expiresAt,
+    },
+    rawSecret: token.raw,
+  });
+  return true;
+}
