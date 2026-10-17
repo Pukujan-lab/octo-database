@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Panel, StatusPill, type PillTone } from "@/components/portal/Panel";
 import { ConfirmGate } from "@/components/portal/ConfirmGate";
+import { ConfirmSecretDialog } from "@/components/portal/ConfirmSecretDialog";
 import { CopyButton, EmptyState } from "@/components/portal/EmptyState";
 import { OneTimeSecret } from "@/components/portal/OneTimeSecret";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useConfirmChallenge } from "@/hooks/useConfirmChallenge";
-import { api, errorMessage, isConfirmSecretMissing } from "@/lib/api";
+import { api, errorCode, errorMessage, isConfirmSecretMissing } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { MeResponse, Workspace } from "@/lib/types";
 import { toast } from "@/utils/toast";
@@ -62,6 +63,10 @@ interface VaultItem {
   label: string;
   description: string;
   kind: Kind;
+  /** "inferred" when the server read the kind off the label; those rows never get a health check. */
+  kindSource: "explicit" | "inferred";
+  /** Service the key belongs to, e.g. "openrouter". Always from the API, never derived here. */
+  group: string;
   username: string | null;
   url: string | null;
   urlKind: UrlKind | null;
@@ -190,6 +195,38 @@ function canHaveRoutes(item: VaultItem): boolean {
   return item.kind === "token" || item.kind === "login";
 }
 
+/** "openrouter" -> "Openrouter", "cloudflare_r2" -> "Cloudflare r2". */
+function displayGroup(name: string): string {
+  const cleaned = name.replace(/[-_]+/g, " ").trim();
+  if (!cleaned) return "Ungrouped";
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function groupNeedsAttention(items: VaultItem[]): boolean {
+  return items.some((item) => item.healthStatus === "stale" || item.healthStatus === "weak");
+}
+
+/**
+ * Inferred keys are read off the label, so they never carry a health check. An em dash says
+ * "nothing to check here" instead of a permanent "unchecked" pill on all 171 rows.
+ */
+function HealthMark({ item }: { item: VaultItem }) {
+  if (item.kindSource === "inferred" && item.healthStatus === "unchecked") {
+    return (
+      <span className="text-xs text-muted-foreground/60" title="kind read from the label — nothing to check">
+        —
+      </span>
+    );
+  }
+  return (
+    <span title={item.healthDetail ?? undefined}>
+      <StatusPill tone={HEALTH_TONE[item.healthStatus]} dot>
+        {item.healthStatus}
+      </StatusPill>
+    </span>
+  );
+}
+
 export function VaultView({
   workspace,
   me,
@@ -200,6 +237,7 @@ export function VaultView({
   const queryClient = useQueryClient();
   const challenge = useConfirmChallenge(true);
   const [gateOpen, setGateOpen] = useState(false);
+  const [needSecret, setNeedSecret] = useState(false);
   const [typed, setTyped] = useState("");
   const [mfaCode, setMfaCode] = useState("");
   const [codeUsed, setCodeUsed] = useState(false);
@@ -247,7 +285,20 @@ export function VaultView({
 
   function onGateError(error: unknown) {
     if (isConfirmSecretMissing(error)) {
-      toast.error("Set a confirmation secret on the Access page first.");
+      // An account that never set a secret cannot satisfy the gate with a stale
+      // code. Set one once and the stored secret works from then on.
+      setNeedSecret(true);
+      toast.error("Set a confirmation secret once, then save again.");
+      return;
+    }
+    const code = errorCode(error);
+    if (code === "CONFIRM_CODE_INVALID" || code === "CONFIRM_SECRET_INVALID") {
+      // The code was mistyped, already used, or expired while the page sat open.
+      // Fetch a live one instead of leaving the stale value on screen.
+      setTyped("");
+      void challenge.refresh();
+      setGateOpen(true);
+      toast.error(errorMessage(error));
       return;
     }
     toast.error(errorMessage(error));
@@ -317,6 +368,17 @@ export function VaultView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmSecretDialog
+        open={needSecret}
+        onOpenChange={setNeedSecret}
+        onDone={() => {
+          // The typed value was stale; show the fresh code so the next save works.
+          setTyped("");
+          void challenge.refresh();
+          setGateOpen(true);
+        }}
+      />
 
       <MintGrant
         workspace={workspace}
@@ -736,6 +798,10 @@ function Cabinet({
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [openRoutes, setOpenRoutes] = useState<string | null>(null);
 
+  // Groups start open; the set holds the ones the owner closed.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+
   const [addOpen, setAddOpen] = useState<boolean | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
@@ -763,12 +829,69 @@ function Cabinet({
 
   const filtersActive = filter.trim().length > 0 || kindFilter !== "all" || healthFilter !== "all";
 
+  /** Only groups with surviving rows exist here, so a fully filtered-out group leaves no header behind. */
+  const groups = useMemo(() => {
+    const buckets = new Map<string, VaultItem[]>();
+    for (const item of visible) {
+      const name = item.group || "ungrouped";
+      const bucket = buckets.get(name);
+      if (bucket) bucket.push(item);
+      else buckets.set(name, [item]);
+    }
+    return [...buckets.entries()]
+      .map(([name, groupItems]) => ({ name, items: groupItems }))
+      .sort((a, b) => displayGroup(a.name).localeCompare(displayGroup(b.name)));
+  }, [visible]);
+
   const bulkLines = bulkText.split("\n").map((line) => line.trim()).filter(Boolean);
 
   function clearFilters() {
     setFilter("");
     setKindFilter("all");
     setHealthFilter("all");
+    setCollapsed(new Set());
+  }
+
+  /** A new filter should never hide its own matches inside a closed group. */
+  function openEverything() {
+    setCollapsed(new Set());
+  }
+
+  function expandAll() {
+    setCollapsed(new Set());
+    setActiveGroup(null);
+  }
+
+  function collapseAll() {
+    setCollapsed(new Set(groups.map((group) => group.name)));
+    setActiveGroup(null);
+  }
+
+  function toggleGroup(name: string) {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  /** Rail click: open the group and scroll to it, or close it if it is already the active one. */
+  function activateGroup(name: string) {
+    if (activeGroup === name) {
+      setActiveGroup(null);
+      setCollapsed((current) => new Set(current).add(name));
+      return;
+    }
+    setActiveGroup(name);
+    setCollapsed((current) => {
+      const next = new Set(current);
+      next.delete(name);
+      return next;
+    });
+    requestAnimationFrame(() => {
+      document.getElementById(`${idPrefix}-group-${name}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   function toggleSort(key: SortKey) {
@@ -786,7 +909,7 @@ function Cabinet({
 
   async function importMany() {
     if (bulkLines.length === 0) {
-      toast.error("Paste at least one LABEL=secret line");
+      toast.error("Paste at least one LABEL=value line");
       return;
     }
     const body = gate();
@@ -795,7 +918,6 @@ function Cabinet({
     try {
       const result = await api.post<{ inserted: number }>("/api/vault/items/bulk", {
         lines: bulkLines,
-        kind,
         workspaceId,
         ...body,
       });
@@ -1048,8 +1170,11 @@ function Cabinet({
                       className="num bg-background text-xs"
                     />
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-[11px] text-muted-foreground">
-                        LABEL=secret per line, saved as {kind}. The description is set to the label.
+                      <p className="max-w-xl text-[11px] leading-relaxed text-muted-foreground">
+                        One key per line, LABEL=value. Octo reads the kind from the label —{" "}
+                        <code className="num">_URL</code> rows become URLs,{" "}
+                        <code className="num">_KEY</code>/<code className="num">_TOKEN</code> rows become tokens,
+                        everything else is kept as a note.
                       </p>
                       <Button
                         type="button"
@@ -1099,13 +1224,22 @@ function Cabinet({
                 <Input
                   data-testid={`${idPrefix}-filter`}
                   value={filter}
-                  onChange={(event) => setFilter(event.target.value)}
+                  onChange={(event) => {
+                    setFilter(event.target.value);
+                    openEverything();
+                  }}
                   placeholder="Search label, description or url"
                   aria-label="Filter keys"
                   className="h-8 bg-background pl-8 text-sm"
                 />
               </div>
-              <Select value={kindFilter} onValueChange={(value) => setKindFilter(value as KindFilter)}>
+              <Select
+                value={kindFilter}
+                onValueChange={(value) => {
+                  setKindFilter(value as KindFilter);
+                  openEverything();
+                }}
+              >
                 <SelectTrigger className="h-8 w-[116px] bg-background text-xs" aria-label="Filter by kind">
                   <SelectValue />
                 </SelectTrigger>
@@ -1118,7 +1252,13 @@ function Cabinet({
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={healthFilter} onValueChange={(value) => setHealthFilter(value as HealthFilter)}>
+              <Select
+                value={healthFilter}
+                onValueChange={(value) => {
+                  setHealthFilter(value as HealthFilter);
+                  openEverything();
+                }}
+              >
                 <SelectTrigger className="h-8 w-[126px] bg-background text-xs" aria-label="Filter by health">
                   <SelectValue />
                 </SelectTrigger>
@@ -1145,6 +1285,22 @@ function Cabinet({
                 )}
                 Newest
               </Button>
+              <div className="inline-flex overflow-hidden rounded-md border border-border">
+                <button
+                  type="button"
+                  onClick={expandAll}
+                  className="h-8 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  Expand all
+                </button>
+                <button
+                  type="button"
+                  onClick={collapseAll}
+                  className="h-8 border-l border-border px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  Collapse all
+                </button>
+              </div>
               <span className="num ml-auto text-xs text-muted-foreground">
                 {visible.length} of {items.length}
               </span>
@@ -1155,33 +1311,74 @@ function Cabinet({
               ) : null}
             </div>
 
-            <div data-testid={`${idPrefix}-items`}>
-              {/* Stacked on narrow screens, a real table from md up. */}
-              <table className="data-table block md:table">
-                <thead className="hidden md:table-header-group">
-                  <tr>
-                    <th aria-sort={sortKey === "label" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                      <SortHeader column="label" label="Key" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                    </th>
-                    <th
-                      className="w-[104px]"
-                      aria-sort={sortKey === "kind" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+            <div className="lg:flex lg:items-start">
+              {/* Index rail: beside the table on lg, a chip row above it on narrow screens. */}
+              <nav
+                aria-label="Services"
+                className="flex shrink-0 items-center gap-1.5 overflow-x-auto px-4 py-2 lg:sticky lg:top-[76px] lg:max-h-[calc(100vh-96px)] lg:w-[176px] lg:flex-col lg:items-stretch lg:gap-0.5 lg:overflow-x-hidden lg:overflow-y-auto lg:border-r lg:border-border lg:px-3 lg:py-3"
+              >
+                <p className="eyebrow hidden px-2 pb-1.5 lg:block">Services</p>
+                {groups.map((group) => {
+                  const active = activeGroup === group.name;
+                  return (
+                    <button
+                      key={group.name}
+                      type="button"
+                      onClick={() => activateGroup(group.name)}
+                      aria-pressed={active}
+                      className={cn(
+                        "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors lg:w-full",
+                        active
+                          ? "bg-accent text-foreground"
+                          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                      )}
                     >
-                      <SortHeader column="kind" label="Kind" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                    </th>
-                    <th
-                      className="w-[128px]"
-                      aria-sort={sortKey === "health" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-                    >
-                      <SortHeader column="health" label="Health" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                    </th>
-                    <th className="w-12 text-right">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="block md:table-row-group">
-                  {visible.length === 0 ? (
+                      <span className="truncate">{displayGroup(group.name)}</span>
+                      {groupNeedsAttention(group.items) ? (
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+                          title="has a weak or stale key"
+                        />
+                      ) : null}
+                      <span className="num ml-auto text-[11px] text-muted-foreground/80">{group.items.length}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+
+              <div className="min-w-0 flex-1" data-testid={`${idPrefix}-items`}>
+                {/* Stacked on narrow screens, a real table from md up. */}
+                <table className="data-table block md:table">
+                  <thead className="hidden md:table-header-group">
+                    <tr>
+                      <th aria-sort={sortKey === "label" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                        <SortHeader column="label" label="Key" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                      </th>
+                      <th
+                        className="w-[104px]"
+                        aria-sort={sortKey === "kind" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+                      >
+                        <SortHeader column="kind" label="Kind" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                      </th>
+                      <th
+                        className="w-[128px]"
+                        aria-sort={sortKey === "health" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+                      >
+                        <SortHeader
+                          column="health"
+                          label="Health"
+                          sortKey={sortKey}
+                          sortDir={sortDir}
+                          onSort={toggleSort}
+                        />
+                      </th>
+                      <th className="w-12 text-right">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="block md:table-row-group">
+                  {groups.length === 0 ? (
                     <tr className="block md:table-row">
                       <td colSpan={4} className="block px-4 py-6 text-sm text-muted-foreground md:table-cell md:px-5">
                         No keys match these filters.{" "}
@@ -1191,75 +1388,130 @@ function Cabinet({
                       </td>
                     </tr>
                   ) : (
-                    visible.map((item) => {
-                      const routesOpen = openRoutes === item.id;
+                    groups.map((group) => {
+                      const expanded = !collapsed.has(group.name);
                       return (
-                        <Fragment key={item.id}>
-                          <tr className="relative block border-b border-border/70 transition-colors hover:bg-accent/40 md:table-row">
-                            <td className="block px-4 py-3 pr-12 align-middle md:table-cell md:px-5 md:py-2.5 md:pr-4">
-                              <div className="flex items-start gap-2">
-                                {canHaveRoutes(item) ? (
-                                  <button
-                                    type="button"
-                                    data-testid={`vault-routes-${item.id}-toggle`}
-                                    aria-expanded={routesOpen}
-                                    aria-label={routesOpen ? "Hide routes" : "Show routes"}
-                                    onClick={() => toggleRoutes(item.id)}
-                                    className="-ml-1 mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                  >
-                                    <ChevronRight
-                                      className={cn("h-3.5 w-3.5 transition-transform", routesOpen && "rotate-90")}
-                                    />
-                                  </button>
-                                ) : (
-                                  <span className="mt-0.5 hidden h-5 w-4 shrink-0 md:block" />
-                                )}
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium leading-5 text-foreground">{item.label}</p>
-                                  {item.description && item.description !== item.label ? (
-                                    <p className="truncate text-xs leading-5 text-muted-foreground">{item.description}</p>
-                                  ) : null}
-                                  {item.url ? (
-                                    <p className="num truncate text-[11px] leading-4 text-muted-foreground/80">{item.url}</p>
-                                  ) : null}
-                                  <div className="mt-1 flex flex-wrap items-center gap-1.5 md:hidden">
-                                    <StatusPill tone="muted">{item.kind}</StatusPill>
-                                    <span title={item.healthDetail ?? undefined}>
-                                      <StatusPill tone={HEALTH_TONE[item.healthStatus]} dot>
-                                        {item.healthStatus}
-                                      </StatusPill>
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="hidden align-middle md:table-cell md:w-[104px] md:px-4 md:py-2.5">
-                              <StatusPill tone="muted">{item.kind}</StatusPill>
-                            </td>
-                            <td className="hidden align-middle md:table-cell md:w-[128px] md:px-4 md:py-2.5">
-                              <span title={item.healthDetail ?? undefined}>
-                                <StatusPill tone={HEALTH_TONE[item.healthStatus]} dot>
-                                  {item.healthStatus}
-                                </StatusPill>
-                              </span>
-                            </td>
-                            <td className="absolute right-1 top-2 p-0 md:static md:table-cell md:w-12 md:px-4 md:py-2.5 md:text-right">
-                              {rowMenu(item)}
+                        <Fragment key={group.name}>
+                          <tr
+                            id={`${idPrefix}-group-${group.name}`}
+                            className="block scroll-mt-24 bg-muted/40 hover:bg-muted/60 md:table-row"
+                          >
+                            <td colSpan={4} className="block border-b border-border p-0 md:table-cell">
+                              <button
+                                type="button"
+                                onClick={() => toggleGroup(group.name)}
+                                aria-expanded={expanded}
+                                className="flex w-full items-center gap-2 px-4 py-2 text-left md:px-5"
+                              >
+                                <ChevronRight
+                                  className={cn(
+                                    "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+                                    expanded && "rotate-90",
+                                  )}
+                                />
+                                <span className="font-display text-[13px] font-semibold text-foreground">
+                                  {displayGroup(group.name)}
+                                </span>
+                                <span className="num text-[11px] text-muted-foreground">{group.items.length}</span>
+                                {groupNeedsAttention(group.items) ? (
+                                  <span
+                                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+                                    title="has a weak or stale key"
+                                  />
+                                ) : null}
+                                <span className="ml-auto text-[11px] text-muted-foreground">
+                                  {expanded ? "hide" : "show"}
+                                </span>
+                              </button>
                             </td>
                           </tr>
-                          {routesOpen ? (
-                            <tr className="block bg-muted/30 md:table-row">
-                              <td colSpan={4} className="block p-0 md:table-cell">
-                                <ItemRoutes item={item} gate={gate} onError={onError} onChanged={onSaved} />
-                              </td>
-                            </tr>
-                          ) : null}
+                          {expanded
+                            ? group.items.map((item) => {
+                                const routesOpen = openRoutes === item.id;
+                                return (
+                                  <Fragment key={item.id}>
+                                    <tr className="relative block border-b border-border/70 transition-colors hover:bg-accent/40 md:table-row">
+                                      <td className="block px-4 py-3 pr-12 align-middle md:table-cell md:px-5 md:py-2.5 md:pr-4">
+                                        <div className="flex items-start gap-2">
+                                          {canHaveRoutes(item) ? (
+                                            <button
+                                              type="button"
+                                              data-testid={`vault-routes-${item.id}-toggle`}
+                                              aria-expanded={routesOpen}
+                                              aria-label={routesOpen ? "Hide routes" : "Show routes"}
+                                              onClick={() => toggleRoutes(item.id)}
+                                              className="-ml-1 mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                            >
+                                              <ChevronRight
+                                                className={cn(
+                                                  "h-3.5 w-3.5 transition-transform",
+                                                  routesOpen && "rotate-90",
+                                                )}
+                                              />
+                                            </button>
+                                          ) : (
+                                            <span className="mt-0.5 hidden h-5 w-4 shrink-0 md:block" />
+                                          )}
+                                          <div className="min-w-0">
+                                            <p className="truncate text-sm font-medium leading-5 text-foreground">
+                                              {item.label}
+                                            </p>
+                                            {item.description && item.description !== item.label ? (
+                                              <p className="truncate text-xs leading-5 text-muted-foreground">
+                                                {item.description}
+                                              </p>
+                                            ) : null}
+                                            {item.url ? (
+                                              <p className="num truncate text-[11px] leading-4 text-muted-foreground/80">
+                                                {item.url}
+                                              </p>
+                                            ) : null}
+                                            <div className="mt-1 flex flex-wrap items-center gap-1.5 md:hidden">
+                                              <StatusPill tone="muted">{item.kind}</StatusPill>
+                                              <HealthMark item={item} />
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="hidden align-middle md:table-cell md:w-[104px] md:px-4 md:py-2.5">
+                                        <span
+                                          title={
+                                            item.kindSource === "inferred" ? "kind read from the label" : undefined
+                                          }
+                                        >
+                                          <StatusPill tone="muted">{item.kind}</StatusPill>
+                                        </span>
+                                      </td>
+                                      <td className="hidden align-middle md:table-cell md:w-[128px] md:px-4 md:py-2.5">
+                                        <HealthMark item={item} />
+                                      </td>
+                                      <td className="absolute right-1 top-2 p-0 md:static md:table-cell md:w-12 md:px-4 md:py-2.5 md:text-right">
+                                        {rowMenu(item)}
+                                      </td>
+                                    </tr>
+                                    {routesOpen ? (
+                                      <tr className="block bg-muted/30 md:table-row">
+                                        <td colSpan={4} className="block p-0 md:table-cell">
+                                          <ItemRoutes
+                                            item={item}
+                                            gate={gate}
+                                            onError={onError}
+                                            onChanged={onSaved}
+                                          />
+                                        </td>
+                                      </tr>
+                                    ) : null}
+                                  </Fragment>
+                                );
+                              })
+                            : null}
                         </Fragment>
                       );
                     })
                   )}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </>
         )}

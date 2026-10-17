@@ -143,11 +143,15 @@ test.describe('vault bulk import', () => {
     await typeConfirmCode(page);
     await page.getByTestId('vault-account-bulk-import').click();
 
-    await expect(page.getByText(first)).toBeVisible();
-    await expect(page.getByText(second)).toBeVisible();
+    // The grouped view renders each label in the sidebar chip, the group header,
+    // and the row paragraph; the row paragraph is the unique per-key target.
+    const rowLabel = (label: string) =>
+      page.getByTestId('vault-account-items').locator('p').filter({ hasText: label });
+    await expect(rowLabel(first)).toBeVisible();
+    await expect(rowLabel(second)).toBeVisible();
 
     await page.getByTestId('vault-account-filter').fill('Alpha');
-    await expect(page.getByText(first)).toBeVisible();
-    await expect(page.getByText(second)).toHaveCount(0);
+    await expect(rowLabel(first)).toBeVisible();
+    await expect(rowLabel(second)).toHaveCount(0);
   });
 });
