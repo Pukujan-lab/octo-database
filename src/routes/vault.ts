@@ -181,6 +181,7 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
         kind: parsed.value.kind,
         username: parsed.value.username,
         url: parsed.value.url,
+        urlKind: parsed.value.urlKind,
         secretEncrypted: seal(parsed.value.secret),
         notesEncrypted: seal(parsed.value.notes),
       });
@@ -238,6 +239,7 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
           kind: item.kind,
           username: item.username,
           url: item.url,
+          urlKind: item.urlKind,
           secretEncrypted: seal(item.secret),
           notesEncrypted: seal(item.notes),
         }))
