@@ -3004,6 +3004,24 @@ export async function dbListVaultRoutesForGrant(itemId: string): Promise<VaultRo
   );
 }
 
+/** Every route in one cabinet, so the open payload is one query, not one per item. */
+export async function dbListVaultRoutesForCabinet(
+  principalId: string,
+  workspaceId: string | null
+): Promise<VaultRouteRow[]> {
+  return queryService<VaultRouteRow>(
+    `SELECT ${VAULT_ROUTE_COLUMNS}
+     FROM octo.vault_routes
+     WHERE principal_id = $1
+       AND item_id IN (
+         SELECT id FROM octo.vault_items
+         WHERE principal_id = $1 AND workspace_id IS NOT DISTINCT FROM $2::uuid
+       )
+     ORDER BY created_at ASC`,
+    [principalId, workspaceId]
+  );
+}
+
 // --- Vault leases (temp working keys) ---------------------------------------
 
 export interface VaultLeaseRow {

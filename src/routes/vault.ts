@@ -8,14 +8,17 @@
  */
 
 import { randomBytes, randomUUID } from 'node:crypto';
+import { getPublicOrigin } from '../lib/public-origin';
 import { hashApiKeySecret } from '../lib/secret-hash';
 import { decryptSecret, encryptSecret } from '../lib/mfa';
 import { checkVaultItem } from '../lib/vault-health';
 import {
   BULK_MAX_LINES,
   grantExpiresAt,
+  leaseExpiresAt,
   parseBulkVaultLine,
   parseGrantHours,
+  parseLeaseDays,
   parseVaultItem,
   parseVaultRoute,
   presentVaultItem,
@@ -39,12 +42,17 @@ import {
   dbInsertVaultGrantService,
   dbInsertVaultItem,
   dbInsertVaultItemsBulk,
+  dbInsertVaultLeaseService,
   dbInsertVaultRoute,
   dbListVaultGrants,
   dbListVaultItems,
   dbListVaultItemsForGrant,
+  dbListVaultLeases,
   dbListVaultRoutes,
+  dbListVaultRoutesForCabinet,
+  dbListVaultRoutesForGrant,
   dbPurgeStaleVaultItems,
+  dbRevokeVaultLease,
   dbUpdateVaultHealth,
   type VaultItemRow,
   type VaultRouteRow,
@@ -54,6 +62,7 @@ import { UUID_PATTERN } from '../server/runtime';
 import type { IncomingMessage, ServerResponse } from 'http';
 
 const GRANT_PREFIX = 'octo_vault_';
+const LEASE_PREFIX = 'octo_tmp_';
 
 function bearer(req: IncomingMessage): string | null {
   const header = req.headers['authorization'];
@@ -142,6 +151,22 @@ function mintToken(): { raw: string; hash: string; prefix: string } {
   return { raw, hash: hashApiKeySecret(raw), prefix: raw.slice(0, 18) };
 }
 
+function mintLeaseToken(): { raw: string; hash: string; prefix: string } {
+  const raw = `${LEASE_PREFIX}${randomBytes(32).toString('base64url')}`;
+  return { raw, hash: hashApiKeySecret(raw), prefix: raw.slice(0, 16) };
+}
+
+/** What the agent needs to use a route: where to send the working key, and how. */
+function relayRoute(origin: string, route: VaultRouteRow) {
+  return {
+    routeKey: route.routeKey,
+    name: route.name,
+    baseUrl: route.baseUrl,
+    authScheme: route.authScheme,
+    url: `${origin}/api/vault/relay/${route.routeKey}`,
+  };
+}
+
 async function workspaceAllowed(
   res: ServerResponse,
   principalId: string,
@@ -165,8 +190,9 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
   if (!path.startsWith('/api/vault')) return false;
 
   try {
-    if (path === '/api/vault/open' && req.method === 'GET') return openCabinet(req, res);
+    if (path === '/api/vault/open' && req.method === 'GET') return openCabinet(req, res, url);
     if (path === '/api/vault/open/decoy' && req.method === 'POST') return mintDecoy(req, res);
+    if (path === '/api/vault/open/lease' && req.method === 'POST') return mintLease(req, res, url);
 
     const auth = await authenticateRequest(req);
     if (!auth) {
@@ -387,6 +413,29 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
       }
     }
 
+    if (path === '/api/vault/leases' && req.method === 'GET') {
+      const leases = await dbListVaultLeases(auth.principal.id);
+      sendJson(res, 200, { leases });
+      return true;
+    }
+
+    const leaseMatch = path.match(/^\/api\/vault\/leases\/([^/]+)$/);
+    if (leaseMatch && req.method === 'DELETE') {
+      const leaseId = leaseMatch[1] ?? '';
+      if (!requireUuid(res, leaseId, 'leaseId')) return true;
+      const body = await readJsonObject(req);
+      if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+        return true;
+      }
+      const revoked = await dbRevokeVaultLease(auth.principal.id, leaseId);
+      if (!revoked) {
+        sendJson(res, 404, { error: 'NOT_FOUND: no active working key with that id.' });
+        return true;
+      }
+      sendJson(res, 200, { revoked: leaseId });
+      return true;
+    }
+
     if (path === '/api/vault/grants' && req.method === 'GET') {
       const grants = await dbListVaultGrants(auth.principal.id);
       sendJson(res, 200, { grants });
@@ -515,15 +564,91 @@ async function loadGrant(req: IncomingMessage, res: ServerResponse) {
   return grant;
 }
 
-async function openCabinet(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+async function openCabinet(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   const grant = await loadGrant(req, res);
   if (!grant) return true;
-  const rows = await dbListVaultItemsForGrant(grant.principalId, grant.workspaceId);
+  const [rows, routes] = await Promise.all([
+    dbListVaultItemsForGrant(grant.principalId, grant.workspaceId),
+    dbListVaultRoutesForCabinet(grant.principalId, grant.workspaceId),
+  ]);
+  const byItem = new Map<string, VaultRouteRow[]>();
+  for (const route of routes) {
+    const list = byItem.get(route.itemId) ?? [];
+    list.push(route);
+    byItem.set(route.itemId, list);
+  }
+  const origin = getPublicOrigin(req, url);
   sendJson(res, 200, {
     cabinet: grant.workspaceId ? 'workspace' : 'account',
     workspaceId: grant.workspaceId,
     expiresAt: grant.expiresAt,
-    items: rows.map((row) => agentItem(row, grant.grantId, grant.decoy)),
+    items: rows.map((row) => ({
+      ...agentItem(row, grant.grantId, grant.decoy),
+      routes: (byItem.get(row.id) ?? []).map((route) => relayRoute(origin, route)),
+    })),
+  });
+  return true;
+}
+
+/**
+ * Exchanges a grant for one working key scoped to one stored item. The key is
+ * shown once; Octo keeps only its hash. A new mint for the same (grant, item)
+ * retires the previous key.
+ */
+async function mintLease(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
+  const grant = await loadGrant(req, res);
+  if (!grant) return true;
+  if (grant.decoy) {
+    sendJson(res, 403, { error: 'FORBIDDEN: a decoy grant cannot mint a working key.' });
+    return true;
+  }
+  const body = await readJsonObject(req);
+  const days = parseLeaseDays(body['expiresInDays']);
+  if (!days.ok) {
+    sendJson(res, 400, { error: days.error });
+    return true;
+  }
+
+  const label = typeof body['label'] === 'string' ? body['label'].trim() : '';
+  const itemId = typeof body['itemId'] === 'string' ? body['itemId'].trim() : '';
+  if (!label && !itemId) {
+    sendJson(res, 400, { error: 'ITEM_REQUIRED: name the stored key by label or itemId.' });
+    return true;
+  }
+  const items = await dbListVaultItemsForGrant(grant.principalId, grant.workspaceId);
+  const item = itemId
+    ? items.find((row) => row.id === itemId)
+    : items.find((row) => row.label.toLowerCase() === label.toLowerCase());
+  if (!item) {
+    sendJson(res, 404, { error: 'NOT_FOUND: no item with that label in this cabinet.' });
+    return true;
+  }
+  if ((item.kind !== 'token' && item.kind !== 'login') || !item.secretEncrypted) {
+    sendJson(res, 400, {
+      error: 'ITEM_NOT_ROUTABLE: only a token or login with a stored secret can become a working key.',
+    });
+    return true;
+  }
+
+  const token = mintLeaseToken();
+  const id = randomUUID();
+  const expiresAt = leaseExpiresAt(days.days);
+  await dbInsertVaultLeaseService({
+    id,
+    principalId: grant.principalId,
+    itemId: item.id,
+    parentGrantId: grant.grantId,
+    keyHash: token.hash,
+    prefix: token.prefix,
+    name: `${grant.grantName} / ${item.label}`.slice(0, 200),
+    expiresAt,
+  });
+  const routes = await dbListVaultRoutesForGrant(item.id);
+  const origin = getPublicOrigin(req, url);
+  sendJson(res, 201, {
+    lease: { id, itemId: item.id, itemLabel: item.label, prefix: token.prefix, expiresAt },
+    rawSecret: token.raw,
+    routes: routes.map((route) => relayRoute(origin, route)),
   });
   return true;
 }
