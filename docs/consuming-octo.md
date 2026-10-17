@@ -153,10 +153,98 @@ infrastructure credentials." Do not reuse it elsewhere and do not treat it as an
 control-plane token. If you would rather never hold it at all, use the SQL surface
 above — it needs no connection string.
 
+## Using a vendor credential without holding it
+
+A stored vendor key can be used by an agent that never sees it. The owner stores the
+real key once in the vault and gives the agent a **vault grant** (`octo_vault_…`). The
+grant is not the vendor credential: it only lets the agent ask Octo for a working key
+scoped to one stored item, which expires on its own and can be revoked on its own.
+
+### 1. Ask for a working key
+
+```bash
+curl -s -X POST https://octo.example/api/vault/open/lease \
+  -H "Authorization: Bearer $OCTO_VAULT_GRANT" \
+  -H 'Content-Type: application/json' \
+  -d '{"label": "Fish Audio", "expiresInDays": 15}'
+```
+
+`label` must match a stored item in the grant's cabinet; `itemId` works too. The
+response carries the working key and the relay route(s) for that item:
+
+```json
+{
+  "lease": { "id": "…", "itemLabel": "Fish Audio", "prefix": "octo_tmp_…", "expiresAt": "…" },
+  "rawSecret": "octo_tmp_…",
+  "routes": [
+    { "routeKey": "fish-audio-1a2b3c", "authScheme": "bearer",
+      "url": "https://octo.example/api/vault/relay/fish-audio-1a2b3c" }
+  ]
+}
+```
+
+The raw key is shown once. `expiresInDays` defaults to 15 and accepts 1–30. Asking
+again for the same item rotates the previous working key out.
+
+### 2. Use it as if it were the vendor key
+
+Point the program's base URL at the route's `url` and put the working key where the
+vendor expects its credential:
+
+```bash
+curl -s https://octo.example/api/vault/relay/fish-audio-1a2b3c/v1/tts \
+  -H "Authorization: Bearer octo_tmp_…"
+```
+
+The relay resolves the working key, injects the stored secret using the route's auth
+scheme, forwards the request, and streams the vendor's response back. The working key
+is stripped from every position the scheme does not use, so it never reaches the
+vendor. The path suffix and query are forwarded unchanged.
+
+The relay accepts the working key in any of the usual positions — `Authorization:
+Bearer`, `Basic` (either half), `x-api-key`, the path, or a query parameter — and
+refuses two *different* keys in two positions. The scheme decides how the stored secret
+is injected upstream:
+
+| Route scheme | Put the working key where the vendor expects it |
+| --- | --- |
+| `bearer` | `Authorization: Bearer octo_tmp_…` |
+| `x-api-key` | the route's header, e.g. `x-api-key: octo_tmp_…` |
+| `basic` | `Authorization: Basic base64(user:octo_tmp_…)` |
+| `query` | the route's query parameter |
+| `body_json` | the route's JSON body field, e.g. `{"api_key": "octo_tmp_…"}` |
+| `path` | in the path where the vendor puts the token, e.g. Telegram `/bot<octo_tmp_…>/getMe` |
+
+### 3. Renew, inspect, revoke
+
+```bash
+# extend the working key
+curl -s -X POST https://octo.example/api/vault/lease/renew \
+  -H "Authorization: Bearer octo_tmp_…" -H 'Content-Type: application/json' \
+  -d '{"expiresInDays": 15}'
+
+# what is this key for?
+curl -s https://octo.example/api/vault/lease/info -H "Authorization: Bearer octo_tmp_…"
+```
+
+The owner lists and revokes working keys from the vault dashboard
+(`GET /api/vault/leases`, `DELETE /api/vault/leases/<id>`). A revoked or expired key
+answers `401`.
+
+### What a working key cannot do
+
+It is not a session, a grant, or an API key. It cannot open the cabinet, list vault
+items, list grants, create workspaces, or call any path outside
+`/api/vault/relay/<routeKey>`, `/api/vault/lease/renew`, and `/api/vault/lease/info`.
+Every other Octo path answers `401`.
+
 ## Discover it
 
 - `GET /api/capabilities` → `workspaces.create`, `workspaces.query`,
   `workspaces.provision_database`
+- Vault broker: `GET /api/vault/open`, `POST /api/vault/open/lease`,
+  `POST /api/vault/lease/renew`, `GET /api/vault/lease/info`,
+  `ANY /api/vault/relay/<routeKey>/…`
 - MCP tools `create_workspace`, `query_workspace_database`, `provision_database`
 - Octo README, "Slice 21"; `docs/self-hosting.md`
 
