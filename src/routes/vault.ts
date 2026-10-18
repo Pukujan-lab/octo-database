@@ -55,6 +55,7 @@ import {
   dbPurgeStaleVaultItems,
   dbRevokeVaultLease,
   dbUpdateVaultHealth,
+  dbUpdateVaultItem,
   dbUpdateVaultRouteHealth,
   type VaultItemRow,
   type VaultRouteRow,
@@ -398,6 +399,46 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
             notes: openSeal(row.notesEncrypted),
           },
         });
+        return true;
+      }
+      if (req.method === 'PATCH') {
+        const body = await readJsonObject(req);
+        if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+          return true;
+        }
+        const existing = await dbGetVaultItem(auth.principal.id, itemId);
+        if (!existing) {
+          sendJson(res, 404, { error: 'NOT_FOUND: no vault item with that id.' });
+          return true;
+        }
+        // An edit that leaves the secret alone sends no `secret` key at all, so
+        // the stored value is validated in its place and written back unchanged.
+        const secretReplaced = Object.prototype.hasOwnProperty.call(body, 'secret');
+        const parsed = parseVaultItem(
+          { ...body, secret: secretReplaced ? body['secret'] : openSeal(existing.secretEncrypted) },
+          existing.workspaceId
+        );
+        if (!parsed.ok) {
+          sendJson(res, 400, { error: parsed.error });
+          return true;
+        }
+        await dbUpdateVaultItem({
+          principalId: auth.principal.id,
+          itemId,
+          label: parsed.value.label,
+          description: parsed.value.description,
+          kind: parsed.value.kind,
+          // A kind the person picked is no longer an inference.
+          kindSource: parsed.value.kind === existing.kind ? existing.kindSource : 'explicit',
+          username: parsed.value.username,
+          url: parsed.value.url,
+          urlKind: parsed.value.urlKind,
+          secretEncrypted: secretReplaced ? seal(parsed.value.secret) : existing.secretEncrypted,
+          notesEncrypted: seal(parsed.value.notes),
+          secretReplaced,
+        });
+        const updated = await dbGetVaultItem(auth.principal.id, itemId);
+        sendJson(res, 200, { item: updated ? publicItem(updated) : { id: itemId } });
         return true;
       }
       if (req.method === 'DELETE') {
