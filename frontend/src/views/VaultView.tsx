@@ -22,6 +22,7 @@ import { ConfirmGate } from "@/components/portal/ConfirmGate";
 import { CopyButton, EmptyState } from "@/components/portal/EmptyState";
 import { OneTimeSecret } from "@/components/portal/OneTimeSecret";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -426,6 +427,7 @@ export function VaultView({
           error={itemsQuery.isError ? errorMessage(itemsQuery.error) : null}
           onRetry={() => void itemsQuery.refetch()}
           workspaceId={null}
+          scopeKey={scope}
           gate={gate}
           onSaved={() => {
             afterGate();
@@ -446,6 +448,7 @@ export function VaultView({
           onRetry={() => void itemsQuery.refetch()}
           workspaceId={workspace?.id ?? null}
           disabled={!workspace}
+          scopeKey={scope}
           gate={gate}
           onSaved={() => {
             afterGate();
@@ -743,6 +746,7 @@ function Cabinet({
   onRetry,
   workspaceId,
   disabled,
+  scopeKey,
   gate,
   onSaved,
   onError,
@@ -756,6 +760,8 @@ function Cabinet({
   onRetry: () => void;
   workspaceId: string | null;
   disabled?: boolean;
+  /** The scope tab this cabinet is drawn under. A change to it drops the selection. */
+  scopeKey: string;
   gate: GateBody;
   onSaved: () => void;
   onError: (error: unknown) => void;
@@ -789,6 +795,10 @@ function Cabinet({
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+
+  /** Keys checked for a bulk delete. The set outlives paging; a narrowing change drops it. */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Closed once the cabinet holds keys, open while it is still empty.
   const addFormOpen = addOpen ?? items.length === 0;
@@ -859,6 +869,10 @@ function Cabinet({
       : `${visible.length} of ${scopeItems.length} keys`;
   const rangeLabel = `${visible.length === 0 ? 0 : pageStart + 1}–${pageStart + pageRows.length} of ${visible.length}`;
 
+  /** How many rows in front of you are checked, so the header box can read all / some / none. */
+  const pageSelected = pageRows.filter((row) => selected.has(row.id)).length;
+  const allPageSelected = pageRows.length > 0 && pageSelected === pageRows.length;
+
   /** Chips are the same filter model the controls drive, one per active narrowing. */
   const chips: Array<{ key: string; label: string; clear: () => void }> = [];
   if (filter.trim()) {
@@ -884,10 +898,14 @@ function Cabinet({
 
   const bulkLines = bulkText.split("\n").map((line) => line.trim()).filter(Boolean);
 
-  /** Any change to search, a dropdown or the service scope puts the list back on page 1. */
+  /**
+   * Any change to search, a dropdown or the service scope puts the list back on page 1 and
+   * drops the selection: a checked row must never be one the person can no longer see.
+   */
   function narrow(apply: () => void) {
     apply();
     setPage(1);
+    setSelected(new Set());
   }
 
   function clearFilters() {
@@ -896,6 +914,32 @@ function Cabinet({
     setHealthFilter("all");
     setService(null);
     setPage(1);
+    setSelected(new Set());
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  function toggleSelected(id: string, checked: boolean) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  /** The header box works on the rows in front of you, never on the whole cabinet. */
+  function togglePage(checked: boolean) {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const row of pageRows) {
+        if (checked) next.add(row.id);
+        else next.delete(row.id);
+      }
+      return next;
+    });
   }
 
   function toggleSort(key: SortKey) {
@@ -922,6 +966,21 @@ function Cabinet({
       setRevealed(null);
     }
   }, [openId, revealed, pageRows]);
+
+  // The scope tabs decide which cabinet holds what, so a checked row does not survive them.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [scopeKey]);
+
+  // A key removed from the row menu is gone from the cabinet too: drop its check with it.
+  useEffect(() => {
+    setSelected((current) => {
+      if (current.size === 0) return current;
+      const alive = new Set(items.map((item) => item.id));
+      const next = new Set([...current].filter((id) => alive.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [items]);
 
   async function importMany() {
     if (bulkLines.length === 0) {
@@ -1006,6 +1065,25 @@ function Cabinet({
       onSaved();
     } catch (caught) {
       onError(caught);
+    }
+  }
+
+  /** The same gate as a single remove, once for the whole checked set. */
+  async function removeSelected() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    const body = gate();
+    if (!body) return;
+    setBulkDeleting(true);
+    try {
+      const result = await api.post<{ deleted: number }>("/api/vault/items/bulk-delete", { ids, ...body });
+      setSelected(new Set());
+      toast.success(`Removed ${result.deleted} key${result.deleted === 1 ? "" : "s"}`);
+      onSaved();
+    } catch (caught) {
+      onError(caught);
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -1244,6 +1322,40 @@ function Cabinet({
           />
         ) : (
           <>
+            {selected.size > 0 ? (
+              <div
+                data-testid="vault-bulk-bar"
+                className="flex flex-wrap items-center gap-2 border-b border-border bg-accent/40 px-4 py-2.5"
+              >
+                <p data-testid="vault-bulk-count" className="flex items-baseline gap-1.5 text-xs text-foreground">
+                  <span className="num font-semibold">{selected.size}</span>
+                  {" selected"}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  data-testid="vault-bulk-clear"
+                  className="h-7 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+                  onClick={clearSelection}
+                >
+                  Clear
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  data-testid="vault-bulk-delete"
+                  className="ml-auto h-8 gap-1.5 text-xs max-sm:w-full"
+                  disabled={bulkDeleting}
+                  onClick={() => void removeSelected()}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {`Delete ${selected.size} key${selected.size === 1 ? "" : "s"}`}
+                </Button>
+              </div>
+            ) : null}
+
             <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
               <div className="relative min-w-[180px] flex-1">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1290,7 +1402,11 @@ function Cabinet({
                 size="sm"
                 variant={sortKey === "newest" ? "default" : "outline"}
                 className="h-8 gap-1.5 text-xs"
-                onClick={() => narrow(() => toggleSort("newest"))}
+                onClick={() => {
+                  // Sorting hides nothing, so it keeps the selection; it still returns to page 1.
+                  toggleSort("newest");
+                  setPage(1);
+                }}
               >
                 {sortKey === "newest" && sortDir === "asc" ? (
                   <ArrowUp className="h-3.5 w-3.5" />
@@ -1412,6 +1528,16 @@ function Cabinet({
                     <table className="data-table block w-full md:table md:table-fixed">
                       <thead className="hidden md:table-header-group">
                         <tr>
+                          <th className="w-10 md:sticky md:top-0 md:z-10 md:bg-muted lg:top-[73px]">
+                            <Checkbox
+                              data-testid={`${idPrefix}-select-page`}
+                              aria-label="Select all keys on this page"
+                              className="data-[state=indeterminate]:bg-accent"
+                              disabled={pageRows.length === 0}
+                              checked={allPageSelected ? true : pageSelected > 0 ? "indeterminate" : false}
+                              onCheckedChange={(state) => togglePage(state === true)}
+                            />
+                          </th>
                           <th
                             className="md:sticky md:top-0 md:z-10 md:bg-muted lg:top-[73px]"
                             aria-sort={sortKey === "label" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
@@ -1444,13 +1570,28 @@ function Cabinet({
                       <tbody className="block md:table-row-group">
                         {pageRows.map((item) => {
                           const detailOpen = openId === item.id;
+                          const isSelected = selected.has(item.id);
                           // One line per key: label, then description and url, each truncated on its own.
                           const blurb =
                             item.description && item.description !== item.label ? item.description : null;
                           return (
                             <Fragment key={item.id}>
-                              <tr className="relative block border-b border-border/70 transition-colors md:table-row">
-                                <td className="block px-4 py-2.5 pr-12 align-middle md:table-cell md:px-4 md:py-2.5">
+                              <tr
+                                className={cn(
+                                  "relative flex items-start border-b border-border/70 transition-colors md:table-row",
+                                  isSelected && "bg-accent/60",
+                                )}
+                              >
+                                {/* Stacked on narrow screens, so the box rides the row's first line. */}
+                                <td className="flex shrink-0 items-start pl-3 pr-1 pt-3 md:table-cell md:w-10 md:px-2 md:py-2">
+                                  <Checkbox
+                                    data-testid={`vault-select-${item.id}`}
+                                    aria-label={`Select ${item.label}`}
+                                    checked={isSelected}
+                                    onCheckedChange={(state) => toggleSelected(item.id, state === true)}
+                                  />
+                                </td>
+                                <td className="block min-w-0 flex-1 py-2.5 pl-1 pr-12 align-middle md:table-cell md:px-4 md:py-2.5">
                                   {/* The cell's width comes from the fixed layout, so this row can truncate
                                       instead of stretching the table. */}
                                   <div className="flex w-full min-w-0 items-center gap-2 overflow-hidden">
@@ -1502,7 +1643,7 @@ function Cabinet({
                               </tr>
                               {detailOpen ? (
                                 <tr className="block bg-muted/30 md:table-row">
-                                  <td colSpan={4} className="block p-0 md:table-cell">
+                                  <td colSpan={5} className="block p-0 md:table-cell">
                                     <ItemDetail
                                       item={item}
                                       revealed={revealed?.id === item.id ? revealed : null}

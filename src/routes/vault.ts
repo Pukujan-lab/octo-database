@@ -33,6 +33,7 @@ import {
   dbConsumeVaultGrant,
   dbDeleteVaultGrant,
   dbDeleteVaultItem,
+  dbDeleteVaultItems,
   dbDeleteVaultRoute,
   dbGetVaultItem,
   dbGetVaultRoute,
@@ -302,6 +303,35 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
         }))
       );
       sendJson(res, 201, { inserted: parsed.length });
+      return true;
+    }
+
+    if (path === '/api/vault/items/bulk-delete' && req.method === 'POST') {
+      const body = await readJsonObject(req);
+      const rawIds = body['ids'];
+      if (!Array.isArray(rawIds) || rawIds.some((id) => typeof id !== 'string')) {
+        sendJson(res, 400, { error: 'BULK_IDS: ids must be an array of item ids.' });
+        return true;
+      }
+      const ids = Array.from(new Set((rawIds as string[]).map((id) => id.trim()).filter(Boolean)));
+      if (ids.length === 0) {
+        sendJson(res, 400, { error: 'BULK_IDS: select at least one item to delete.' });
+        return true;
+      }
+      if (ids.length > BULK_MAX_LINES) {
+        sendJson(res, 400, { error: `BULK_TOO_LARGE: at most ${BULK_MAX_LINES} items per delete.` });
+        return true;
+      }
+      // Validate before the gate so a malformed request never burns the code.
+      for (const id of ids) {
+        if (!requireUuid(res, id, 'ids')) return true;
+      }
+
+      if (!(await confirmGate(res, auth, body['confirmSecret'], { requireMfa: true, mfaCode: body['mfaCode'] }))) {
+        return true;
+      }
+      const deleted = await dbDeleteVaultItems(auth.principal.id, ids);
+      sendJson(res, 200, { deleted });
       return true;
     }
 
