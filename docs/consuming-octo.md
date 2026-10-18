@@ -153,12 +153,33 @@ infrastructure credentials." Do not reuse it elsewhere and do not treat it as an
 control-plane token. If you would rather never hold it at all, use the SQL surface
 above — it needs no connection string.
 
+## The vault: three token families, and what each one can see
+
+Octo's vault holds the owner's real vendor credentials. Three different tokens touch
+it, and they are **not interchangeable**. Name the one you hold by its prefix.
+
+| Prefix | Name | Who holds it | What it can do |
+| --- | --- | --- | --- |
+| `octo_live_acc_…` / `octo_live_ws_…` | API key | Agent | Workspaces and SQL. **Cannot open the vault** — `GET /api/vault/open` answers `401`, other `/api/vault/*` routes `403`. |
+| `octo_vault_…` | Vault grant | Agent | The cabinet **inventory**: labels, descriptions, urls, `hasSecret`, routes. Never a stored value. Mints working keys. |
+| `octo_tmp_…` | Working key (lease) | Agent | One stored item, relay only. **Never sees the vendor secret** and cannot open the cabinet. |
+
+### A grant is an inventory, not a reader
+
+`GET /api/vault/open` with a grant tells you **that** a key exists and how to reach
+it. It does not decrypt anything. There is no call, with any grant, that returns a
+stored `secret` or `notes` value — the only way to spend a credential is a working
+key on a relay route, where Octo injects it server-side.
+
+That is what makes one grant safe to hand an agent: it can discover all of the
+owner's keys, and it still cannot read one.
+
 ## Using a vendor credential without holding it
 
 A stored vendor key can be used by an agent that never sees it. The owner stores the
 real key once in the vault and gives the agent a **vault grant** (`octo_vault_…`). The
-grant is not the vendor credential: it only lets the agent ask Octo for a working key
-scoped to one stored item, which expires on its own and can be revoked on its own.
+grant lets the agent find the item and ask for a working key scoped to it, which
+expires on its own and can be revoked on its own.
 
 ### 1. Ask for a working key
 
@@ -170,7 +191,11 @@ curl -s -X POST https://octo.example/api/vault/open/lease \
 ```
 
 `label` must match a stored item in the grant's cabinet; `itemId` works too. The
-response carries the working key and the relay route(s) for that item:
+item must have a route, or a `url` of its own — Octo turns an item url into a bearer
+route the first time it is minted. An item with neither answers
+`400 ROUTE_REQUIRED`.
+
+The response carries the working key and the relay route(s) for that item:
 
 ```json
 {
@@ -238,11 +263,33 @@ items, list grants, create workspaces, or call any path outside
 `/api/vault/relay/<routeKey>`, `/api/vault/lease/renew`, and `/api/vault/lease/info`.
 Every other Octo path answers `401`.
 
+That fence is the point: a working key is the only vault token an agent should hold.
+
+## Vault endpoints (exact paths)
+
+There is no separate "vault service" host or subdomain. The vault is part of the Octo
+API, under `/api/vault/`. If a token returns `401` on `/api/files`, `/api/shares`, or
+`/api/workspaces`, that is expected — those are not vault routes.
+
+| Call | Token | Purpose |
+| --- | --- | --- |
+| `GET /api/vault/open` | grant | Read the cabinet **inventory**. Never returns a stored secret. |
+| `POST /api/vault/open/lease` | grant | Mint a working key for one item. |
+| `POST /api/vault/lease/renew` | working key | Extend a working key. |
+| `GET /api/vault/lease/info` | working key | Describe a working key. |
+| `ANY /api/vault/relay/<routeKey>/…` | working key | Call the vendor through Octo. |
+| `GET /api/vault/grants`, `DELETE /api/vault/grants/<id>` | session | Owner lists and revokes grants. |
+| `GET /api/vault/leases`, `DELETE /api/vault/leases/<id>` | session | Owner lists and revokes working keys. |
+
+A token that is valid for one row of that table is not valid for another. In
+particular, a grant does **not** authenticate `/api/workspaces`, `/api/files`, or the
+SQL surface, and an API key does **not** authenticate `/api/vault/open`.
+
 ## Discover it
 
 - `GET /api/capabilities` → `workspaces.create`, `workspaces.query`,
   `workspaces.provision_database`
-- Vault broker: `GET /api/vault/open`, `POST /api/vault/open/lease`,
+- Vault: `GET /api/vault/open`, `POST /api/vault/open/lease`,
   `POST /api/vault/lease/renew`, `GET /api/vault/lease/info`,
   `ANY /api/vault/relay/<routeKey>/…`
 - MCP tools `create_workspace`, `query_workspace_database`, `provision_database`
@@ -289,6 +336,18 @@ with its own scoped role (pgvector-ready). Reach it either way:
 Only depart from this if you can demonstrate a concrete incompatibility, and
 surface that to the owner before building anything. See Octo's
 `docs/consuming-octo.md` (repo: octo-database) and incident #162.
+
+**Vault tokens are not interchangeable.** Name the token by its prefix before using
+it. `octo_live_…` is an API key: it cannot open the vault. `octo_vault_…` is a
+**vault grant**: `GET /api/vault/open` lists every item's label, description, url,
+and `hasSecret` — the inventory, never a stored value. `octo_tmp_…` is a **working
+key**: one stored item, relay-only, never reveals the vendor secret. To use a vendor
+key, list the cabinet with the grant, mint a working key for the item you need
+(`POST /api/vault/open/lease`), then call `/api/vault/relay/<routeKey>` with it. An
+item with no route and no url answers `ROUTE_REQUIRED` — ask the human to add one.
+The vault lives under `/api/vault/` on the same Octo host — there is no separate
+vault subdomain, and `401` on `/api/workspaces` or `/api/files` with a vault token is
+expected, not a sign the vault is missing.
 
 **Octo's repo is read-only to you.** You consume Octo; you do not change it — no
 pull requests, branches, or file edits against `octo-database`, not even to make

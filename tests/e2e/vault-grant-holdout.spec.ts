@@ -1,12 +1,11 @@
 /**
  * Hidden holdout for the vault cabinet.
  *
- * The public unit tests name the parser and the presenter. This flow does not:
- * a guest stores an account token and a workspace password, each with its own
- * description, mints a 10-hour account grant, and opens it. The account token
- * comes back with its description. The workspace password does not. A decoy
- * minted from that grant keeps the description and withholds the token. A
- * normal API key is refused at the cabinet.
+ * The public unit tests name the parser. This flow does not: a guest stores an
+ * account token and a workspace password, each with its own description, mints
+ * a 10-hour account grant, and opens it. The inventory carries the token's
+ * label, description, url, and hasSecret — never the value. The workspace
+ * password is not in an account grant at all. A normal API key is refused.
  */
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
@@ -31,7 +30,7 @@ async function createGuest(request: APIRequestContext): Promise<GuestSession> {
 }
 
 test.describe('vault grant holdout', () => {
-  test('an account grant reads the token, skips the workspace password, and a decoy keeps only the description', async ({
+  test('an account grant lists the token, skips the workspace password, and never decrypts', async ({
     request,
     page,
   }) => {
@@ -94,40 +93,32 @@ test.describe('vault grant holdout', () => {
     const { rawSecret } = (await minted.json()) as { rawSecret: string };
     expect(rawSecret.startsWith('octo_vault_')).toBe(true);
 
+    // The grant is an inventory, not a reader: it learns the shape of the
+    // cabinet and nothing decrypted, not even for its own account token.
     const opened = await request.get('/api/vault/open', { headers: bearer(rawSecret) });
     expect(opened.status()).toBe(200);
-    const cabinet = (await opened.json()) as {
+    const openedBody = await opened.text();
+    const cabinet = JSON.parse(openedBody) as {
       cabinet: string;
-      items: Array<{ label: string; description: string; secret: string | null; kind: string }>;
+      items: Array<{ label: string; description: string; kind: string; hasSecret: boolean; url: string | null }>;
     };
     expect(cabinet.cabinet).toBe('account');
     expect(cabinet.items.map((item) => item.label)).toEqual(['Cloudflare']);
     expect(cabinet.items[0]?.description).toBe(tokenDescription);
-    expect(cabinet.items[0]?.secret).toBe(tokenSecret);
-    expect(JSON.stringify(cabinet)).not.toContain(passwordSecret);
+    expect(cabinet.items[0]?.hasSecret).toBe(true);
+    expect(cabinet.items[0]?.url).toBe('https://api.cloudflare.com/client/v4');
+    expect(openedBody).not.toContain(tokenSecret);
+    expect(openedBody).not.toContain(passwordSecret);
     expect(JSON.stringify(cabinet)).not.toContain(passwordDescription);
 
-    const decoyMint = await request.post('/api/vault/open/decoy', {
-      headers: bearer(rawSecret),
-      data: { expiresInHours: 5 },
+    // A second grant reads the same inventory: there is no per-grant stand-in.
+    const secondGrant = await request.post('/api/vault/grants', {
+      headers: bearer(session.sessionToken),
+      data: { name: 'second', expiresInHours: 10, confirmSecret: CONFIRM_SECRET },
     });
-    expect(decoyMint.status()).toBe(201);
-    const decoySecret = ((await decoyMint.json()) as { rawSecret: string }).rawSecret;
-
-    const decoyOpen = await request.get('/api/vault/open', { headers: bearer(decoySecret) });
-    expect(decoyOpen.status()).toBe(200);
-    const decoyBody = await decoyOpen.text();
-    const decoyCabinet = JSON.parse(decoyBody) as {
-      items: Array<{ description: string; secret: string | null }>;
-    };
-    expect(decoyCabinet.items[0]?.description).toBe(tokenDescription);
-    expect(decoyCabinet.items[0]?.secret).not.toBe(tokenSecret);
-    expect(decoyBody).not.toContain(tokenSecret);
-    expect(decoyBody.toLowerCase()).not.toContain('decoy');
-
-    const again = await request.get('/api/vault/open', { headers: bearer(decoySecret) });
-    const againCabinet = (await again.json()) as { items: Array<{ secret: string | null }> };
-    expect(againCabinet.items[0]?.secret).toBe(decoyCabinet.items[0]?.secret);
+    const secondSecret = ((await secondGrant.json()) as { rawSecret: string }).rawSecret;
+    const again = await request.get('/api/vault/open', { headers: bearer(secondSecret) });
+    expect(((await again.json()) as { items: unknown }).items).toEqual(cabinet.items);
 
     const apiKey = await request.post('/api/keys', {
       headers: bearer(session.sessionToken),

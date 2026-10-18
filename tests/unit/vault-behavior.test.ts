@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { parseGrantHours, parseVaultItem, presentVaultItem } from '../../src/lib/vault-policy';
+import { parseGrantHours, parseVaultItem } from '../../src/lib/vault-policy';
 
 const WORKSPACE = 'a1b2c3d4-e5f6-4789-abcd-ef0123456789';
 
@@ -74,40 +74,4 @@ describe('handing a grant to an agent', () => {
     expect(parseGrantHours(73).ok).toBe(false);
   });
 
-  it('given a real grant, when the agent opens the cabinet, then it receives the password and the description', () => {
-    const opened = presentVaultItem({
-      id: '22222222-2222-4222-8222-222222222222',
-      label: 'Studio mail',
-      description: 'The mailbox password for the studio admin login.',
-      kind: 'login',
-      username: 'ada@studio.test',
-      url: null,
-      secret: 'correct-horse',
-      notes: null,
-      healthStatus: 'unchecked',
-      grantId: '11111111-1111-4111-8111-111111111111',
-      decoy: false,
-    });
-    expect(opened.secret).toBe('correct-horse');
-    expect(opened.description).toBe('The mailbox password for the studio admin login.');
-  });
-
-  it('given a decoy grant, when the agent opens the cabinet, then the description matches and the password does not', () => {
-    const opened = presentVaultItem({
-      id: '22222222-2222-4222-8222-222222222222',
-      label: 'Studio mail',
-      description: 'The mailbox password for the studio admin login.',
-      kind: 'login',
-      username: 'ada@studio.test',
-      url: null,
-      secret: 'correct-horse',
-      notes: null,
-      healthStatus: 'unchecked',
-      grantId: '11111111-1111-4111-8111-111111111111',
-      decoy: true,
-    });
-    expect(opened.description).toBe('The mailbox password for the studio admin login.');
-    expect(opened.secret).not.toBe('correct-horse');
-    expect(JSON.stringify(opened).toLowerCase()).not.toContain('decoy');
-  });
 });
