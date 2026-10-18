@@ -807,20 +807,21 @@ function Cabinet({
       .sort((a, b) => displayGroup(a.name).localeCompare(displayGroup(b.name)));
   }, [items]);
 
-  /** The same services under the letter they start with: A–Z, then # for anything else. */
+  /** The same services under a five-letter band: A–E, F–J, … U–Z, then # for anything else. */
   const serviceLetters = useMemo(() => {
-    const letters = new Map<string, Array<{ name: string; items: VaultItem[] }>>();
+    const bands = new Map<string, Array<{ name: string; items: VaultItem[] }>>();
     for (const group of services) {
       const first = displayGroup(group.name).charAt(0).toUpperCase();
-      const letter = first >= "A" && first <= "Z" ? first : "#";
-      const bucket = letters.get(letter);
+      const code = first.charCodeAt(0) - 65;
+      const start = code >= 0 && code < 26 ? Math.floor(code / 5) * 5 : null;
+      const end = start === null ? 0 : Math.min(start + 4, 25);
+      const band = start === null ? "#" : `${String.fromCharCode(65 + start)}–${String.fromCharCode(65 + end)}`;
+      const bucket = bands.get(band);
       if (bucket) bucket.push(group);
-      else letters.set(letter, [group]);
+      else bands.set(band, [group]);
     }
-    // Services are already in display-name order, so each bucket keeps that order.
-    return [...letters.entries()].sort(([a], [b]) =>
-      a === "#" ? 1 : b === "#" ? -1 : a.localeCompare(b),
-    );
+    // Services are already in display-name order, so each band keeps that order.
+    return [...bands.entries()].sort(([a], [b]) => (a === "#" ? -1 : b === "#" ? 1 : a.localeCompare(b)));
   }, [services]);
 
   /** The selected service's keys, before search and dropdowns narrow them further. */
