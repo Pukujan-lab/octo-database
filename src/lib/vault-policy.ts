@@ -4,7 +4,6 @@
  * one definition.
  */
 
-
 export const VAULT_KINDS = ['login', 'token', 'url', 'note'] as const;
 export type VaultKind = (typeof VAULT_KINDS)[number];
 
