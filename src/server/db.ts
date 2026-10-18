@@ -2715,6 +2715,58 @@ export async function dbInsertVaultItemsBulk(
   });
 }
 
+/** Rewrites the editable fields of one item. A replaced secret resets the
+ *  health reading, since the old probe result described a different value. */
+export async function dbUpdateVaultItem(input: {
+  principalId: string;
+  itemId: string;
+  label: string;
+  description: string;
+  kind: string;
+  kindSource: 'explicit' | 'inferred';
+  username: string | null;
+  url: string | null;
+  urlKind: string | null;
+  secretEncrypted: string | null;
+  notesEncrypted: string | null;
+  secretReplaced: boolean;
+}): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    `UPDATE octo.vault_items
+     SET label = $3,
+         description = $4,
+         kind = $5,
+         kind_source = $6,
+         username = $7,
+         url = $8,
+         url_kind = $9,
+         secret_encrypted = $10,
+         notes_encrypted = $11,
+         health_status = CASE WHEN $12 THEN 'unchecked' ELSE health_status END,
+         health_detail = CASE WHEN $12 THEN NULL ELSE health_detail END,
+         last_health_at = CASE WHEN $12 THEN NULL ELSE last_health_at END,
+         stale_since = CASE WHEN $12 THEN NULL ELSE stale_since END,
+         updated_at = now()
+     WHERE principal_id = $1 AND id = $2
+     RETURNING id`,
+    [
+      input.principalId,
+      input.itemId,
+      input.label,
+      input.description,
+      input.kind,
+      input.kindSource,
+      input.username,
+      input.url,
+      input.urlKind,
+      input.secretEncrypted,
+      input.notesEncrypted,
+      input.secretReplaced,
+    ]
+  );
+  return rows.length > 0;
+}
+
 export async function dbDeleteVaultItem(principalId: string, itemId: string): Promise<boolean> {
   const rows = await query<{ id: string }>(
     'DELETE FROM octo.vault_items WHERE principal_id = $1 AND id = $2 RETURNING id',
