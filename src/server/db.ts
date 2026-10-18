@@ -2856,9 +2856,10 @@ export async function dbInsertVaultGrant(input: {
 }
 
 /**
- * Inserts a decoy grant minted by an agent. The agent has no session, so this
- * uses the service pool and copies the cabinet from the parent grant. The
- * caller has already verified that parent.
+ * Inserts a narrowed grant minted by an agent. The agent has no session, so
+ * this uses the service pool and copies the cabinet from the parent grant. The
+ * caller has already verified that parent. The `decoy` column now only means
+ * "cannot mint a working key"; the inventory it reads is identical.
  */
 export async function dbInsertVaultGrantService(input: {
   id: string;
@@ -3030,6 +3031,27 @@ export async function dbInsertVaultRoute(input: {
       input.bodyField,
       input.basicUsername,
     ]
+  );
+}
+
+/**
+ * Derives a route from an item's own url. The caller is a grant with no
+ * session, so RLS would refuse the insert on the app pool.
+ */
+export async function dbInsertVaultRouteService(input: {
+  id: string;
+  principalId: string;
+  itemId: string;
+  routeKey: string;
+  name: string;
+  baseUrl: string;
+}): Promise<void> {
+  await queryService(
+    `INSERT INTO octo.vault_routes (
+       id, principal_id, item_id, route_key, name, base_url, auth_scheme
+     ) VALUES ($1, $2, $3, $4, $5, $6, 'bearer')
+     ON CONFLICT (route_key) DO NOTHING`,
+    [input.id, input.principalId, input.itemId, input.routeKey, input.name, input.baseUrl]
   );
 }
 

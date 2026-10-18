@@ -22,7 +22,6 @@ import {
   parseLeaseDays,
   parseVaultItem,
   parseVaultRoute,
-  presentVaultItem,
   routeKeySlug,
   STALE_PURGE_MS,
   type VaultItemInput,
@@ -44,6 +43,7 @@ import {
   dbInsertVaultItemsBulk,
   dbInsertVaultLeaseService,
   dbInsertVaultRoute,
+  dbInsertVaultRouteService,
   dbListVaultGrants,
   dbListVaultItems,
   dbListVaultItemsForGrant,
@@ -135,20 +135,22 @@ function publicRoute(row: VaultRouteRow) {
   };
 }
 
-function agentItem(row: VaultItemRow, grantId: string, decoy: boolean) {
-  return presentVaultItem({
+/**
+ * What a grant may know about an item before it asks for a working key: the
+ * shape of the cabinet, never the stored value. Nothing here decrypts.
+ */
+function inventoryItem(row: VaultItemRow, routes: VaultRouteRow[], origin: string) {
+  return {
     id: row.id,
     label: row.label,
     description: row.description,
     kind: row.kind,
-    username: row.username,
     url: row.url,
-    secret: openSeal(row.secretEncrypted),
-    notes: openSeal(row.notesEncrypted),
+    hasSecret: Boolean(row.secretEncrypted),
+    hasNotes: Boolean(row.notesEncrypted),
     healthStatus: row.healthStatus,
-    grantId,
-    decoy,
-  });
+    routes: routes.map((route) => relayRoute(origin, route)),
+  };
 }
 
 function mintToken(): { raw: string; hash: string; prefix: string } {
@@ -665,12 +667,32 @@ async function openCabinet(req: IncomingMessage, res: ServerResponse, url: URL):
     cabinet: grant.workspaceId ? 'workspace' : 'account',
     workspaceId: grant.workspaceId,
     expiresAt: grant.expiresAt,
-    items: rows.map((row) => ({
-      ...agentItem(row, grant.grantId, grant.decoy),
-      routes: (byItem.get(row.id) ?? []).map((route) => relayRoute(origin, route)),
-    })),
+    items: rows.map((row) => inventoryItem(row, byItem.get(row.id) ?? [], origin)),
   });
   return true;
+}
+
+/**
+ * A key item that carries its own url is usable without a hand-made route: the
+ * url is the upstream base, and a bearer header is the common case. An explicit
+ * route always wins — this only fills the gap when the item has none.
+ */
+async function ensureDerivedRoute(item: VaultItemRow, principalId: string): Promise<VaultRouteRow[]> {
+  const existing = await dbListVaultRoutesForGrant(item.id);
+  if (existing.length > 0) return existing;
+  if (!item.url || !/^https?:\/\//i.test(item.url)) return existing;
+
+  await dbInsertVaultRouteService({
+    id: randomUUID(),
+    principalId,
+    itemId: item.id,
+    // route_key is unique across the table, so the suffix keeps two cabinets
+    // with the same item label from colliding.
+    routeKey: `${routeKeySlug(item.label)}-auto-${randomBytes(3).toString('hex')}`,
+    name: `${item.label} (from url)`,
+    baseUrl: item.url,
+  });
+  return dbListVaultRoutesForGrant(item.id);
 }
 
 /**
@@ -682,7 +704,7 @@ async function mintLease(req: IncomingMessage, res: ServerResponse, url: URL): P
   const grant = await loadGrant(req, res);
   if (!grant) return true;
   if (grant.decoy) {
-    sendJson(res, 403, { error: 'FORBIDDEN: a decoy grant cannot mint a working key.' });
+    sendJson(res, 403, { error: 'FORBIDDEN: that grant cannot mint a working key.' });
     return true;
   }
   const body = await readJsonObject(req);
@@ -713,6 +735,14 @@ async function mintLease(req: IncomingMessage, res: ServerResponse, url: URL): P
     return true;
   }
 
+  const routes = await ensureDerivedRoute(item, grant.principalId);
+  if (routes.length === 0) {
+    sendJson(res, 400, {
+      error: 'ROUTE_REQUIRED: that item has no relay route. Give it a url, or add a route from the dashboard.',
+    });
+    return true;
+  }
+
   const token = mintLeaseToken();
   const id = randomUUID();
   const expiresAt = leaseExpiresAt(days.days);
@@ -726,7 +756,6 @@ async function mintLease(req: IncomingMessage, res: ServerResponse, url: URL): P
     name: `${grant.grantName} / ${item.label}`.slice(0, 200),
     expiresAt,
   });
-  const routes = await dbListVaultRoutesForGrant(item.id);
   const origin = getPublicOrigin(req, url);
   sendJson(res, 201, {
     lease: { id, itemId: item.id, itemLabel: item.label, prefix: token.prefix, expiresAt },
@@ -736,9 +765,17 @@ async function mintLease(req: IncomingMessage, res: ServerResponse, url: URL): P
   return true;
 }
 
+/**
+ * A narrower grant: same cabinet, shorter lifetime, still inventory-only. Kept
+ * for callers that already mint one; it no longer differs in what it discloses.
+ */
 async function mintDecoy(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const grant = await loadGrant(req, res);
   if (!grant) return true;
+  if (grant.decoy) {
+    sendJson(res, 403, { error: 'FORBIDDEN: a narrowed grant cannot mint another.' });
+    return true;
+  }
   const body = await readJsonObject(req);
   const hours = parseGrantHours(body['expiresInHours']);
   if (!hours.ok) {
@@ -755,7 +792,7 @@ async function mintDecoy(req: IncomingMessage, res: ServerResponse): Promise<boo
     parentGrantId: grant.grantId,
     keyHash: token.hash,
     prefix: token.prefix,
-    name: `${grant.grantName} decoy`,
+    name: `${grant.grantName} (narrowed)`,
     expiresAt,
   });
   sendJson(res, 201, {
