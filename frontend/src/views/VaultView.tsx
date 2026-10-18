@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { Panel, StatusPill, type PillTone } from "@/components/portal/Panel";
 import { ConfirmGate } from "@/components/portal/ConfirmGate";
-import { ConfirmSecretDialog } from "@/components/portal/ConfirmSecretDialog";
 import { CopyButton, EmptyState } from "@/components/portal/EmptyState";
 import { OneTimeSecret } from "@/components/portal/OneTimeSecret";
 import { Button } from "@/components/ui/button";
@@ -42,7 +41,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useConfirmChallenge } from "@/hooks/useConfirmChallenge";
-import { api, errorCode, errorMessage, isConfirmSecretMissing } from "@/lib/api";
+import { api, errorCode, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { MeResponse, Workspace } from "@/lib/types";
 import { toast } from "@/utils/toast";
@@ -237,7 +236,6 @@ export function VaultView({
   const queryClient = useQueryClient();
   const challenge = useConfirmChallenge(true);
   const [gateOpen, setGateOpen] = useState(false);
-  const [needSecret, setNeedSecret] = useState(false);
   const [typed, setTyped] = useState("");
   const [mfaCode, setMfaCode] = useState("");
   const [codeUsed, setCodeUsed] = useState(false);
@@ -284,13 +282,6 @@ export function VaultView({
   }
 
   function onGateError(error: unknown) {
-    if (isConfirmSecretMissing(error)) {
-      // An account that never set a secret cannot satisfy the gate with a stale
-      // code. Set one once and the stored secret works from then on.
-      setNeedSecret(true);
-      toast.error("Set a confirmation secret once, then save again.");
-      return;
-    }
     const code = errorCode(error);
     if (code === "CONFIRM_CODE_INVALID" || code === "CONFIRM_SECRET_INVALID") {
       // The code was mistyped, already used, or expired while the page sat open.
@@ -368,17 +359,6 @@ export function VaultView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <ConfirmSecretDialog
-        open={needSecret}
-        onOpenChange={setNeedSecret}
-        onDone={() => {
-          // The typed value was stale; show the fresh code so the next save works.
-          setTyped("");
-          void challenge.refresh();
-          setGateOpen(true);
-        }}
-      />
 
       <MintGrant
         workspace={workspace}
