@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  decoyField,
   GRANT_DEFAULT_HOURS,
   LEASE_DEFAULT_DAYS,
   leaseExpiresAt,
@@ -164,29 +163,5 @@ describe('credential routes', () => {
   it('slugifies a name', () => {
     expect(routeKeySlug('CKFF EU edge')).toBe('ckff-eu-edge');
     expect(routeKeySlug('  ')).toBe('route');
-  });
-});
-
-describe('decoy fields', () => {
-  const grant = '11111111-1111-4111-8111-111111111111';
-  const item = '22222222-2222-4222-8222-222222222222';
-
-  it('is stable and is not the stored secret', () => {
-    const first = decoyField(grant, item, 'secret', 'token');
-    const second = decoyField(grant, item, 'secret', 'token');
-    expect(first).toBe(second);
-    expect(first).not.toBe('cf-real-token-value');
-    expect(first.toLowerCase()).not.toContain('decoy');
-  });
-
-  it('changes when the grant changes', () => {
-    const other = '33333333-3333-4333-8333-333333333333';
-    expect(decoyField(grant, item, 'secret', 'token')).not.toBe(decoyField(other, item, 'secret', 'token'));
-  });
-
-  it('replaces a stored url with a reserved host', () => {
-    const url = decoyField(grant, item, 'secret', 'url');
-    expect(url.startsWith('https://example.invalid/')).toBe(true);
-    expect(url).not.toContain('files.example.com');
   });
 });

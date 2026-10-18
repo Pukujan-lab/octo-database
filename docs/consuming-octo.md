@@ -156,48 +156,30 @@ above — it needs no connection string.
 ## The vault: three token families, and what each one can see
 
 Octo's vault holds the owner's real vendor credentials. Three different tokens touch
-it, and they are **not interchangeable**. Mixing them up is the most common source of
-agent confusion, so name the one you hold by its prefix before you use it.
+it, and they are **not interchangeable**. Name the one you hold by its prefix.
 
 | Prefix | Name | Who holds it | What it can do |
 | --- | --- | --- | --- |
 | `octo_live_acc_…` / `octo_live_ws_…` | API key | Agent | Workspaces and SQL. **Cannot open the vault** — `GET /api/vault/open` answers `401`, other `/api/vault/*` routes `403`. |
-| `octo_vault_…` | Vault grant | **Owner only** | Reads the cabinet. `GET /api/vault/open` returns every item **with its real plaintext `secret` and `notes`**. Mints working keys. |
+| `octo_vault_…` | Vault grant | Agent | The cabinet **inventory**: labels, descriptions, urls, `hasSecret`, routes. Never a stored value. Mints working keys. |
 | `octo_tmp_…` | Working key (lease) | Agent | One stored item, relay only. **Never sees the vendor secret** and cannot open the cabinet. |
 
-### A grant is not a temp key — it is the whole cabinet in cleartext
+### A grant is an inventory, not a reader
 
-This is the part to get right:
+`GET /api/vault/open` with a grant tells you **that** a key exists and how to reach
+it. It does not decrypt anything. There is no call, with any grant, that returns a
+stored `secret` or `notes` value — the only way to spend a credential is a working
+key on a relay route, where Octo injects it server-side.
 
-- A **vault grant** is an owner credential. `GET /api/vault/open` with a grant returns
-  the cabinet's items with their real `secret` and `notes` values, decrypted. Anyone
-  holding the grant can read every real key in that cabinet until it expires. A grant
-  is reusable for its whole lifetime; it is not a one-shot token.
-- A **working key** is the agent-facing temp key. It is scoped to a single stored item,
-  is only valid on the relay and lease paths, and Octo substitutes the real secret
-  server-side. The agent never receives the vendor credential.
-
-So the sentence "Octo gives agents temp keys instead of the real keys" is true **of
-working keys** and false **of grants**. If you are an agent and you were handed an
-`octo_vault_…` token, you have been handed a cabinet reader, not a temp key.
-
-**Agent rule:** never ask the owner for a vault grant, and never paste one into a
-project. Ask for a **working key** for the one item you need. If the owner wants you to
-use a credential that has no relay route yet, ask them to add the route first (or to
-paste that single value into the project's secret store). Do not read the cabinet to
-"find" a key.
-
-**Owner rule:** a grant is a deliberate disclosure of every secret in its cabinet.
-Mint one only for an agent you would hand the whole cabinet to, scope it to a
-workspace cabinet rather than the account cabinet where possible, set the shortest
-expiry that works, and revoke it when the task is done.
+That is what makes one grant safe to hand an agent: it can discover all of the
+owner's keys, and it still cannot read one.
 
 ## Using a vendor credential without holding it
 
-The owner stores the real key once in the vault and gives the agent a **working key**
-(`octo_tmp_…`) — either minted directly for the agent, or obtained by the agent from a
-grant the owner chose to share. A working key expires on its own and can be revoked on
-its own.
+A stored vendor key can be used by an agent that never sees it. The owner stores the
+real key once in the vault and gives the agent a **vault grant** (`octo_vault_…`). The
+grant lets the agent find the item and ask for a working key scoped to it, which
+expires on its own and can be revoked on its own.
 
 ### 1. Ask for a working key
 
@@ -209,7 +191,11 @@ curl -s -X POST https://octo.example/api/vault/open/lease \
 ```
 
 `label` must match a stored item in the grant's cabinet; `itemId` works too. The
-response carries the working key and the relay route(s) for that item:
+item must have a route, or a `url` of its own — Octo turns an item url into a bearer
+route the first time it is minted. An item with neither answers
+`400 ROUTE_REQUIRED`.
+
+The response carries the working key and the relay route(s) for that item:
 
 ```json
 {
@@ -287,7 +273,7 @@ API, under `/api/vault/`. If a token returns `401` on `/api/files`, `/api/shares
 
 | Call | Token | Purpose |
 | --- | --- | --- |
-| `GET /api/vault/open` | grant | Read the cabinet. **Returns real plaintext secrets.** |
+| `GET /api/vault/open` | grant | Read the cabinet **inventory**. Never returns a stored secret. |
 | `POST /api/vault/open/lease` | grant | Mint a working key for one item. |
 | `POST /api/vault/lease/renew` | working key | Extend a working key. |
 | `GET /api/vault/lease/info` | working key | Describe a working key. |
@@ -353,15 +339,15 @@ surface that to the owner before building anything. See Octo's
 
 **Vault tokens are not interchangeable.** Name the token by its prefix before using
 it. `octo_live_…` is an API key: it cannot open the vault. `octo_vault_…` is a
-**vault grant**: `GET /api/vault/open` with it returns every item's real plaintext
-secret — treat it as the owner's credential, never ask for one, never store one in
-this project. `octo_tmp_…` is a **working key**: one stored item, relay-only, never
-reveals the vendor secret. To use a vendor key, ask the human for a working key for
-that one item and call `/api/vault/relay/<routeKey>`; if there is no relay route,
-ask the human to add one or to paste that single value into this project's secret
-store. The vault lives under `/api/vault/` on the same Octo host — there is no
-separate vault subdomain, and `401` on `/api/workspaces` or `/api/files` with a
-vault token is expected, not a sign the vault is missing.
+**vault grant**: `GET /api/vault/open` lists every item's label, description, url,
+and `hasSecret` — the inventory, never a stored value. `octo_tmp_…` is a **working
+key**: one stored item, relay-only, never reveals the vendor secret. To use a vendor
+key, list the cabinet with the grant, mint a working key for the item you need
+(`POST /api/vault/open/lease`), then call `/api/vault/relay/<routeKey>` with it. An
+item with no route and no url answers `ROUTE_REQUIRED` — ask the human to add one.
+The vault lives under `/api/vault/` on the same Octo host — there is no separate
+vault subdomain, and `401` on `/api/workspaces` or `/api/files` with a vault token is
+expected, not a sign the vault is missing.
 
 **Octo's repo is read-only to you.** You consume Octo; you do not change it — no
 pull requests, branches, or file edits against `octo-database`, not even to make
