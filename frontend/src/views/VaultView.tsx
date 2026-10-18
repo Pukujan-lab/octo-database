@@ -179,7 +179,7 @@ const SCOPES = [
 ] as const;
 
 /** Rows per page. A service with fewer keys still shows a footer, so the shape never jumps. */
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 10;
 
 type Scope = (typeof SCOPES)[number]["value"];
 type SortKey = "label" | "kind" | "health" | "newest";
@@ -807,6 +807,22 @@ function Cabinet({
       .sort((a, b) => displayGroup(a.name).localeCompare(displayGroup(b.name)));
   }, [items]);
 
+  /** The same services under the letter they start with: A–Z, then # for anything else. */
+  const serviceLetters = useMemo(() => {
+    const letters = new Map<string, Array<{ name: string; items: VaultItem[] }>>();
+    for (const group of services) {
+      const first = displayGroup(group.name).charAt(0).toUpperCase();
+      const letter = first >= "A" && first <= "Z" ? first : "#";
+      const bucket = letters.get(letter);
+      if (bucket) bucket.push(group);
+      else letters.set(letter, [group]);
+    }
+    // Services are already in display-name order, so each bucket keeps that order.
+    return [...letters.entries()].sort(([a], [b]) =>
+      a === "#" ? 1 : b === "#" ? -1 : a.localeCompare(b),
+    );
+  }, [services]);
+
   /** The selected service's keys, before search and dropdowns narrow them further. */
   const scopeItems = useMemo(
     () => (service ? items.filter((item) => (item.group || "ungrouped") === service) : items),
@@ -1329,29 +1345,45 @@ function Cabinet({
                   <span className="truncate">All services</span>
                   <span className="num ml-auto text-[11px] text-muted-foreground/80">{items.length}</span>
                 </button>
-                {services.map((group) => {
-                  const active = service === group.name;
-                  return (
-                    <button
-                      key={group.name}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => narrow(() => setService(active ? null : group.name))}
-                      className={cn(
-                        "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors lg:w-full",
-                        active
-                          ? "bg-accent text-foreground"
-                          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                      )}
+                {serviceLetters.map(([letter, letterGroups]) => (
+                  <Fragment key={letter}>
+                    {/* A landmark, not a control: the services under it stay the thing you click. */}
+                    <p
+                      data-testid={`vault-service-letter-${letter}`}
+                      className="eyebrow hidden px-2 pb-1 pt-2.5 text-[10px] opacity-60 lg:block"
                     >
-                      <span className="truncate">{displayGroup(group.name)}</span>
-                      {groupNeedsAttention(group.items) ? (
-                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" title="has a weak or stale key" />
-                      ) : null}
-                      <span className="num ml-auto text-[11px] text-muted-foreground/80">{group.items.length}</span>
-                    </button>
-                  );
-                })}
+                      {letter}
+                    </p>
+                    {letterGroups.map((group) => {
+                      const active = service === group.name;
+                      return (
+                        <button
+                          key={group.name}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => narrow(() => setService(active ? null : group.name))}
+                          className={cn(
+                            "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors lg:w-full",
+                            active
+                              ? "bg-accent text-foreground"
+                              : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                          )}
+                        >
+                          <span className="truncate">{displayGroup(group.name)}</span>
+                          {groupNeedsAttention(group.items) ? (
+                            <span
+                              className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+                              title="has a weak or stale key"
+                            />
+                          ) : null}
+                          <span className="num ml-auto text-[11px] text-muted-foreground/80">
+                            {group.items.length}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </Fragment>
+                ))}
               </nav>
 
               <div className="min-w-0 flex-1">
