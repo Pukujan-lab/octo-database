@@ -2775,6 +2775,15 @@ export async function dbDeleteVaultItem(principalId: string, itemId: string): Pr
   return rows.length > 0;
 }
 
+/** Deletes the ids this principal owns and reports how many rows went. */
+export async function dbDeleteVaultItems(principalId: string, itemIds: string[]): Promise<number> {
+  const rows = await query<{ id: string }>(
+    'DELETE FROM octo.vault_items WHERE principal_id = $1 AND id = ANY($2::uuid[]) RETURNING id',
+    [principalId, itemIds]
+  );
+  return rows.length;
+}
+
 export async function dbUpdateVaultHealth(
   principalId: string,
   itemId: string,
