@@ -4,8 +4,6 @@
  * one definition.
  */
 
-import { createHmac } from 'node:crypto';
-
 export const VAULT_KINDS = ['login', 'token', 'url', 'note'] as const;
 export type VaultKind = (typeof VAULT_KINDS)[number];
 
@@ -337,65 +335,3 @@ export function parseBulkVaultLine(
   return { ok: true, value };
 }
 
-export interface PresentedVaultItem {
-  id: string;
-  label: string;
-  description: string;
-  kind: VaultKind;
-  username: string | null;
-  url: string | null;
-  secret: string | null;
-  notes: string | null;
-  healthStatus: string;
-}
-
-/**
- * The payload an agent receives. A decoy keeps the label and the description
- * (so the agent still knows which item it is) and replaces the secret, the
- * username, and the notes. The stored secret is not an input to the stand-in.
- */
-export function presentVaultItem(input: PresentedVaultItem & { grantId: string; decoy: boolean }): PresentedVaultItem {
-  if (!input.decoy) {
-    return {
-      id: input.id,
-      label: input.label,
-      description: input.description,
-      kind: input.kind,
-      username: input.username,
-      url: input.url,
-      secret: input.secret,
-      notes: input.notes,
-      healthStatus: input.healthStatus,
-    };
-  }
-  return {
-    id: input.id,
-    label: input.label,
-    description: input.description,
-    kind: input.kind,
-    username: input.username ? decoyField(input.grantId, input.id, 'username', input.kind) : null,
-    url: input.kind === 'url' && input.url ? decoyField(input.grantId, input.id, 'secret', 'url') : input.url,
-    secret: input.secret ? decoyField(input.grantId, input.id, 'secret', input.kind) : null,
-    notes: input.notes ? decoyField(input.grantId, input.id, 'notes', input.kind) : null,
-    healthStatus: input.healthStatus,
-  };
-}
-
-/**
- * Stand-in for one field of one item, stable for a grant. The stored secret is
- * not an input, so the result cannot be the real value. Nothing in the string
- * says "decoy": the agent-facing payload has the same shape as a real open.
- */
-export function decoyField(grantId: string, itemId: string, field: 'secret' | 'username' | 'notes', kind: VaultKind): string {
-  const mac = createHmac('sha256', 'octo-vault-decoy-v1')
-    .update(grantId)
-    .update('\0')
-    .update(itemId)
-    .update('\0')
-    .update(field)
-    .digest('base64url');
-  if (field === 'secret' && kind === 'url') return `https://example.invalid/v/${mac.slice(0, 24)}`;
-  if (field === 'username') return `user_${mac.slice(0, 12)}`;
-  if (field === 'notes') return mac.slice(0, 24);
-  return mac.slice(0, 43);
-}

@@ -1,34 +1,14 @@
 /**
  * Property and metamorphic checks for the vault cabinet.
  *
- * The relations are quantified over a generated set, not one example:
- * a lifetime is accepted exactly on the closed hour range, a decoy stand-in
- * does not change when the stored secret changes, and a description moves
- * with the item on both the real and the decoy payload.
+ * The relations are quantified over a generated set, not one example: a
+ * lifetime is accepted exactly on the closed hour range, and a health verdict
+ * depends on the status, not on which call produced it.
  */
 
 import { describe, expect, it } from 'vitest';
 import { checkVaultItem } from '../../src/lib/vault-health';
-import {
-  GRANT_MAX_HOURS,
-  GRANT_MIN_HOURS,
-  parseGrantHours,
-  presentVaultItem,
-  type VaultKind,
-} from '../../src/lib/vault-policy';
-
-const GRANT = '11111111-1111-4111-8111-111111111111';
-const ITEM = '22222222-2222-4222-8222-222222222222';
-
-function xorshift(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state ^= state << 13;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    return state >>> 0;
-  };
-}
+import { GRANT_MAX_HOURS, GRANT_MIN_HOURS, parseGrantHours } from '../../src/lib/vault-policy';
 
 describe('grant lifetime property', () => {
   it('accepts exactly the whole hours from 5 through 72', () => {
@@ -43,63 +23,6 @@ describe('grant lifetime property', () => {
   it('treats a fractional hour the same as a refusal, including next to the default', () => {
     for (const hours of [4.9, 5.1, 23.5, 24.5, 71.9, 72.1]) {
       expect(parseGrantHours(hours).ok).toBe(false);
-    }
-  });
-});
-
-describe('decoy metamorphic relation', () => {
-  const kinds: VaultKind[] = ['login', 'token', 'url', 'note'];
-
-  it('keeps the decoy stand-in fixed when the stored secret changes', () => {
-    const next = xorshift(0xdec0);
-    for (const kind of kinds) {
-      const firstSecret = `secret-${next().toString(16)}`;
-      const secondSecret = `secret-${next().toString(16)}`;
-      const base = {
-        id: ITEM,
-        label: 'Cloudflare',
-        description: 'Account token for the zone, not the R2 token.',
-        kind,
-        username: 'ada',
-        url: 'https://api.cloudflare.com/client/v4',
-        notes: 'rotated last week',
-        healthStatus: 'unchecked',
-        grantId: GRANT,
-        decoy: true as const,
-      };
-      const first = presentVaultItem({ ...base, secret: firstSecret });
-      const second = presentVaultItem({ ...base, secret: secondSecret });
-      expect(first.secret).toBe(second.secret);
-      expect(first.secret).not.toBe(firstSecret);
-      expect(first.secret).not.toBe(secondSecret);
-      expect(first.description).toBe(base.description);
-      expect(first.label).toBe(base.label);
-    }
-  });
-
-  it('moves the description on the real payload and the decoy payload together', () => {
-    const next = xorshift(0xbdd);
-    for (let i = 0; i < 20; i += 1) {
-      const description = `what this password is for ${next().toString(16)}`;
-      const secret = `pw-${next().toString(16)}`;
-      const shared = {
-        id: ITEM,
-        label: 'Studio mail',
-        description,
-        kind: 'login' as const,
-        username: 'ada@studio.test',
-        url: null,
-        secret,
-        notes: null,
-        healthStatus: 'unchecked',
-        grantId: GRANT,
-      };
-      const real = presentVaultItem({ ...shared, decoy: false });
-      const decoy = presentVaultItem({ ...shared, decoy: true });
-      expect(real.description).toBe(description);
-      expect(decoy.description).toBe(description);
-      expect(real.secret).toBe(secret);
-      expect(decoy.secret).not.toBe(secret);
     }
   });
 });
