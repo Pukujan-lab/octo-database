@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -9,6 +9,7 @@ import {
   KeyRound,
   Link2,
   MoreHorizontal,
+  Pencil,
   Plus,
   Search,
   ShieldAlert,
@@ -55,6 +56,9 @@ type UrlKind = "api_base" | "api_endpoint" | "docs" | "console" | "cors" | "s3_e
 /** What every write on this page needs: a typed, single-use confirmation code. */
 type Gate = { confirmSecret: string; mfaCode?: string };
 type GateBody = () => Gate | null;
+
+/** A revealed secret only ever belongs to the row it came from. */
+type Revealed = { id: string; label: string; secret: string | null; notes: string | null };
 
 interface VaultItem {
   id: string;
@@ -197,6 +201,12 @@ function canHaveRoutes(item: VaultItem): boolean {
   return item.kind === "token" || item.kind === "login";
 }
 
+/** The chevron opens the row's detail area. Only tokens and logins also carry routes there. */
+function detailToggleLabel(item: VaultItem, open: boolean): string {
+  if (canHaveRoutes(item)) return open ? "Hide routes" : "Show routes";
+  return open ? "Hide details" : "Show details";
+}
+
 /** "openrouter" -> "Openrouter", "cloudflare_r2" -> "Cloudflare r2". */
 function displayGroup(name: string): string {
   const cleaned = name.replace(/[-_]+/g, " ").trim();
@@ -244,7 +254,6 @@ export function VaultView({
   const [codeUsed, setCodeUsed] = useState(false);
   const [scope, setScope] = useState<Scope>("all");
   const [rawSecret, setRawSecret] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState<{ label: string; secret: string | null; notes: string | null } | null>(null);
 
   const itemsQuery = useQuery({
     queryKey: ["vault-items"],
@@ -383,15 +392,6 @@ export function VaultView({
         />
       ) : null}
 
-      {revealed ? (
-        <OneTimeSecret
-          label={revealed.label}
-          value={revealed.secret || revealed.notes || ""}
-          hint={revealed.notes && revealed.secret ? `Notes: ${revealed.notes}` : "Shown from this session only. Dismiss to clear it."}
-          onDismiss={() => setRevealed(null)}
-        />
-      ) : null}
-
       <div className="flex flex-wrap items-center gap-3">
         <div role="group" aria-label="Scope" className="inline-flex overflow-hidden rounded-md border border-border">
           {SCOPES.map((option) => (
@@ -432,7 +432,6 @@ export function VaultView({
             void reload();
           }}
           onError={onGateError}
-          onReveal={setRevealed}
         />
       ) : null}
 
@@ -453,7 +452,6 @@ export function VaultView({
             void reload();
           }}
           onError={onGateError}
-          onReveal={setRevealed}
         />
       ) : null}
 
@@ -748,7 +746,6 @@ function Cabinet({
   gate,
   onSaved,
   onError,
-  onReveal,
 }: {
   idPrefix: string;
   title: string;
@@ -762,7 +759,6 @@ function Cabinet({
   gate: GateBody;
   onSaved: () => void;
   onError: (error: unknown) => void;
-  onReveal: (value: { label: string; secret: string | null; notes: string | null }) => void;
 }) {
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
@@ -779,7 +775,11 @@ function Cabinet({
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("label");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [openRoutes, setOpenRoutes] = useState<string | null>(null);
+
+  /** The one row whose detail area is open — for its routes, its secret, or both. */
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState<Revealed | null>(null);
+  const [editing, setEditing] = useState<VaultItem | null>(null);
 
   /** Service scope picked in the rail. null means every service. */
   const [service, setService] = useState<string | null>(null);
@@ -890,9 +890,21 @@ function Cabinet({
     setSortDir(key === "newest" ? "desc" : "asc");
   }
 
-  function toggleRoutes(id: string) {
-    setOpenRoutes((current) => (current === id ? null : id));
+  function toggleDetail(id: string) {
+    setOpenId((current) => (current === id ? null : id));
+    // Only one row is open at a time, so opening another one drops the secret with it.
+    setRevealed(null);
   }
+
+  // A secret never outlives its row: a page, scope or filter change that pushes the
+  // item out of the table closes the detail and drops the value. The same guard covers
+  // a reveal that lands after its detail was closed again.
+  useEffect(() => {
+    if (openId && !pageRows.some((row) => row.id === openId)) setOpenId(null);
+    if (revealed && (revealed.id !== openId || !pageRows.some((row) => row.id === revealed.id))) {
+      setRevealed(null);
+    }
+  }, [openId, revealed, pageRows]);
 
   async function importMany() {
     if (bulkLines.length === 0) {
@@ -950,12 +962,19 @@ function Cabinet({
     }
   }
 
+  /** Open the row first, then fill its detail area. The secret lands where the eye already is. */
   async function reveal(item: VaultItem) {
+    setOpenId(item.id);
     try {
       const result = await api.get<{ item: { label: string; secret: string | null; notes: string | null } }>(
         `/api/vault/items/${item.id}`,
       );
-      onReveal({ label: result.item.label, secret: result.item.secret, notes: result.item.notes });
+      setRevealed({
+        id: item.id,
+        label: result.item.label,
+        secret: result.item.secret,
+        notes: result.item.notes,
+      });
     } catch (caught) {
       onError(caught);
     }
@@ -974,7 +993,7 @@ function Cabinet({
   }
 
   function rowMenu(item: VaultItem) {
-    const routesOpen = openRoutes === item.id;
+    const detailOpen = openId === item.id;
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -992,9 +1011,12 @@ function Cabinet({
           <DropdownMenuItem onSelect={() => void reveal(item)}>
             <Eye className="mr-2 h-3.5 w-3.5" /> Show
           </DropdownMenuItem>
+          <DropdownMenuItem data-testid={`vault-edit-${item.id}`} onSelect={() => setEditing(item)}>
+            <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+          </DropdownMenuItem>
           {canHaveRoutes(item) ? (
-            <DropdownMenuItem onSelect={() => toggleRoutes(item.id)}>
-              <Link2 className="mr-2 h-3.5 w-3.5" /> {routesOpen ? "Hide routes" : "Routes"}
+            <DropdownMenuItem onSelect={() => toggleDetail(item.id)}>
+              <Link2 className="mr-2 h-3.5 w-3.5" /> {detailOpen ? "Hide routes" : "Routes"}
             </DropdownMenuItem>
           ) : null}
           <DropdownMenuSeparator />
@@ -1354,7 +1376,7 @@ function Cabinet({
                       }
                     />
                   ) : (
-                    <table className="data-table block md:table">
+                    <table className="data-table block w-full md:table md:table-fixed">
                       <thead className="hidden md:table-header-group">
                         <tr>
                           <th
@@ -1388,7 +1410,7 @@ function Cabinet({
                       </thead>
                       <tbody className="block md:table-row-group">
                         {pageRows.map((item) => {
-                          const routesOpen = openRoutes === item.id;
+                          const detailOpen = openId === item.id;
                           // One line per key: label, then description and url, each truncated on its own.
                           const blurb =
                             item.description && item.description !== item.label ? item.description : null;
@@ -1396,24 +1418,22 @@ function Cabinet({
                             <Fragment key={item.id}>
                               <tr className="relative block border-b border-border/70 transition-colors md:table-row">
                                 <td className="block px-4 py-2.5 pr-12 align-middle md:table-cell md:px-4 md:py-2.5">
-                                  <div className="flex min-w-0 items-center gap-2">
-                                    {canHaveRoutes(item) ? (
-                                      <button
-                                        type="button"
-                                        data-testid={`vault-routes-${item.id}-toggle`}
-                                        aria-expanded={routesOpen}
-                                        aria-label={routesOpen ? "Hide routes" : "Show routes"}
-                                        onClick={() => toggleRoutes(item.id)}
-                                        className="-ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                      >
-                                        <ChevronRight
-                                          className={cn("h-3.5 w-3.5 transition-transform", routesOpen && "rotate-90")}
-                                        />
-                                      </button>
-                                    ) : (
-                                      <span className="hidden h-5 w-4 shrink-0 md:block" />
-                                    )}
-                                    <p className="num max-w-full shrink-0 truncate text-[13px] font-medium leading-5 text-foreground md:max-w-[46%]">
+                                  {/* The cell's width comes from the fixed layout, so this row can truncate
+                                      instead of stretching the table. */}
+                                  <div className="flex w-full min-w-0 items-center gap-2 overflow-hidden">
+                                    <button
+                                      type="button"
+                                      data-testid={`vault-routes-${item.id}-toggle`}
+                                      aria-expanded={detailOpen}
+                                      aria-label={detailToggleLabel(item, detailOpen)}
+                                      onClick={() => toggleDetail(item.id)}
+                                      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                    >
+                                      <ChevronRight
+                                        className={cn("h-3.5 w-3.5 transition-transform", detailOpen && "rotate-90")}
+                                      />
+                                    </button>
+                                    <p className="num min-w-0 truncate text-[13px] font-medium leading-5 text-foreground md:max-w-[46%]">
                                       {item.label}
                                     </p>
                                     {blurb ? (
@@ -1422,11 +1442,14 @@ function Cabinet({
                                       </p>
                                     ) : null}
                                     {item.url ? (
-                                      <p className="num hidden max-w-[30%] shrink-0 truncate text-[11px] leading-5 text-muted-foreground/80 lg:block">
+                                      <p
+                                        title={item.url}
+                                        className="num hidden max-w-[30%] shrink-0 truncate text-[11px] leading-5 text-muted-foreground/80 lg:block"
+                                      >
                                         {item.url}
                                       </p>
                                     ) : null}
-                                </div>
+                                  </div>
                                 <div className="mt-1 flex flex-wrap items-center gap-1.5 md:hidden">
                                   <StatusPill tone="muted">{item.kind}</StatusPill>
                                   <HealthMark item={item} />
@@ -1440,19 +1463,21 @@ function Cabinet({
                               <td className="hidden align-middle md:table-cell md:w-[128px] md:px-4 md:py-2">
                                 <HealthMark item={item} />
                               </td>
-                              <td className="absolute right-1 top-1.5 p-0 md:static md:table-cell md:w-12 md:px-4 md:py-2 md:text-right">
+                              <td className="absolute right-1 top-1.5 p-0 md:static md:table-cell md:w-12 md:px-2 md:py-2 md:text-right">
                                 {rowMenu(item)}
                               </td>
                               </tr>
-                              {routesOpen ? (
+                              {detailOpen ? (
                                 <tr className="block bg-muted/30 md:table-row">
                                   <td colSpan={4} className="block p-0 md:table-cell">
-                                    <ItemRoutes
+                                    <ItemDetail
                                       item={item}
+                                      revealed={revealed?.id === item.id ? revealed : null}
                                       gate={gate}
                                       onError={onError}
                                       onChanged={onSaved}
                                       onReveal={() => void reveal(item)}
+                                      onDismiss={() => setRevealed(null)}
                                     />
                                   </td>
                                 </tr>
@@ -1500,24 +1525,45 @@ function Cabinet({
           </>
         )}
       </div>
+
+      {editing ? (
+        <EditItem
+          key={editing.id}
+          item={editing}
+          gate={gate}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            // A rewritten secret must not keep sitting in state beside the row.
+            setRevealed((current) => (current?.id === editing.id ? null : current));
+            onSaved();
+          }}
+          onError={onError}
+        />
+      ) : null}
     </Panel>
   );
 }
 
-function ItemRoutes({
+function ItemDetail({
   item,
+  revealed,
   gate,
   onError,
   onChanged,
   onReveal,
+  onDismiss,
 }: {
   item: VaultItem;
+  revealed: { label: string; secret: string | null; notes: string | null } | null;
   gate: GateBody;
   onError: (error: unknown) => void;
   onChanged: () => void;
   onReveal: () => void;
+  onDismiss: () => void;
 }) {
   const queryClient = useQueryClient();
+  const routable = canHaveRoutes(item);
   // The route form stays shut until asked for: most keys have no routes at all.
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState("");
@@ -1532,6 +1578,8 @@ function ItemRoutes({
   const routesQuery = useQuery({
     queryKey: ["vault-routes", item.id],
     queryFn: () => api.get<{ routes: VaultRoute[] }>(`/api/vault/items/${item.id}/routes`),
+    // A note or a plain URL has no routes to fetch; its detail area only carries the secret.
+    enabled: routable,
   });
   const routes = routesQuery.data?.routes ?? [];
 
@@ -1586,16 +1634,30 @@ function ItemRoutes({
 
   return (
     <div className="space-y-2.5 px-4 py-3 md:px-5" data-testid={`vault-routes-${item.id}`}>
+      {/* The secret opens first, inside the row that asked for it — never above the page. */}
+      {revealed ? (
+        <OneTimeSecret
+          label={revealed.label}
+          value={revealed.secret || revealed.notes || ""}
+          hint={
+            revealed.notes && revealed.secret
+              ? `Notes: ${revealed.notes}`
+              : "Shown from this session only. Dismiss to clear it."
+          }
+          onDismiss={onDismiss}
+        />
+      ) : null}
+
       {/* Opening a row should tell you something even when it has no routes. */}
-      {item.url || item.hasNotes || (item.description && item.description !== item.label) ? (
+      {item.url || item.hasSecret || item.hasNotes || (item.description && item.description !== item.label) ? (
         <div className="space-y-1">
-          {item.url ? <p className="num truncate text-[11px] text-muted-foreground">{item.url}</p> : null}
+          {item.url ? <p className="num break-all text-[11px] text-muted-foreground">{item.url}</p> : null}
           {item.description && item.description !== item.label ? (
             <p className="text-xs leading-relaxed text-muted-foreground">{item.description}</p>
           ) : null}
-          {item.hasNotes ? (
+          {item.hasSecret || item.hasNotes ? (
             <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-              Notes attached.
+              {item.hasNotes ? "Notes attached." : "Secret stored."}
               <button
                 type="button"
                 onClick={onReveal}
@@ -1608,7 +1670,7 @@ function ItemRoutes({
         </div>
       ) : null}
 
-      {routesQuery.isPending ? (
+      {!routable ? null : routesQuery.isPending ? (
         <div className="h-8 animate-pulse rounded-md bg-muted" />
       ) : routes.length === 0 ? (
         <p className="text-xs text-muted-foreground">No routes yet.</p>
@@ -1622,9 +1684,11 @@ function ItemRoutes({
               <span title={route.healthDetail ?? undefined}>
                 <StatusPill tone={ROUTE_TONE[route.healthStatus]}>{route.healthStatus}</StatusPill>
               </span>
-              <span className="num truncate text-[11px] text-muted-foreground">{route.baseUrl}</span>
+              <span className="num min-w-0 max-w-full truncate text-[11px] text-muted-foreground">
+                {route.baseUrl}
+              </span>
               <span className="ml-auto flex items-center gap-1">
-                <span className="num hidden text-[11px] text-muted-foreground sm:inline">
+                <span className="num hidden min-w-0 max-w-full truncate text-[11px] text-muted-foreground sm:inline">
                   {relayUrl(route.routeKey)}
                 </span>
                 <CopyButton value={relayUrl(route.routeKey)} onCopied={() => toast.success("Relay URL copied")} />
@@ -1719,11 +1783,272 @@ function ItemRoutes({
             </p>
           </div>
         </div>
-      ) : (
+      ) : !routable ? null : (
         <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => setFormOpen(true)}>
           Add route
         </Button>
       )}
     </div>
+  );
+}
+
+type EditFields = {
+  label: string;
+  description: string;
+  kind: Kind;
+  username: string;
+  url: string;
+  urlKind: UrlKind;
+  notes: string;
+};
+
+/** The single-item read carries the notes. The list payload never does, and neither carries the secret. */
+type StoredItem = {
+  label: string;
+  description: string | null;
+  kind: Kind;
+  username: string | null;
+  url: string | null;
+  urlKind: UrlKind | null;
+  notes: string | null;
+};
+
+/**
+ * Editing rewrites every field on the server, so the form sends all of them back and
+ * starts from the stored values. The row already knows most of them; the notes only
+ * arrive with the item read, so the form opens on the row's values and fills the rest
+ * as that lands. The secret is never prefilled: an empty field leaves it alone.
+ */
+function EditItem({
+  item,
+  gate,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  item: VaultItem;
+  gate: GateBody;
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (error: unknown) => void;
+}) {
+  const [fields, setFields] = useState<EditFields>({
+    label: item.label,
+    description: item.description,
+    kind: item.kind,
+    username: item.username ?? "",
+    url: item.url ?? "",
+    urlKind: item.urlKind ?? "api_base",
+    notes: "",
+  });
+  const [secret, setSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  // Whatever the person has typed wins over the fetch, even if it lands mid-keystroke.
+  const touched = useRef(new Set<keyof EditFields>());
+
+  function setField<K extends keyof EditFields>(key: K, value: EditFields[K]) {
+    touched.current.add(key);
+    setFields((current) => ({ ...current, [key]: value }));
+  }
+
+  useEffect(() => {
+    let alive = true;
+    setLoadError(null);
+    api
+      .get<{ item: StoredItem }>(`/api/vault/items/${item.id}`)
+      .then((result) => {
+        if (!alive) return;
+        const detail = result.item;
+        setFields((current) => ({
+          label: touched.current.has("label") ? current.label : detail.label,
+          description: touched.current.has("description") ? current.description : (detail.description ?? ""),
+          kind: touched.current.has("kind") ? current.kind : detail.kind,
+          username: touched.current.has("username") ? current.username : (detail.username ?? ""),
+          url: touched.current.has("url") ? current.url : (detail.url ?? ""),
+          urlKind: touched.current.has("urlKind") ? current.urlKind : (detail.urlKind ?? current.urlKind),
+          notes: touched.current.has("notes") ? current.notes : (detail.notes ?? ""),
+        }));
+        setLoaded(true);
+      })
+      .catch((caught) => {
+        if (alive) setLoadError(errorMessage(caught));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [item.id, attempt]);
+
+  async function save() {
+    // Sending a field the read never returned would clear it.
+    if (!loaded) return;
+    const body = gate();
+    if (!body) return;
+    setBusy(true);
+    try {
+      await api.patch(`/api/vault/items/${item.id}`, {
+        label: fields.label,
+        description: fields.description,
+        kind: fields.kind,
+        username: fields.username,
+        url: fields.url,
+        urlKind: fields.kind === "url" ? fields.urlKind : null,
+        notes: fields.notes,
+        ...(secret.trim() ? { secret: secret.trim() } : {}),
+        ...body,
+      });
+      toast.success("Saved");
+      onSaved();
+    } catch (caught) {
+      onError(caught);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent data-testid="vault-edit-dialog" className="max-h-[90vh] max-w-lg overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{item.label}</DialogTitle>
+          <DialogDescription>
+            Every field is written back as it stands here, so clear a field to clear it. Leave the
+            secret blank to keep the one already stored.
+          </DialogDescription>
+        </DialogHeader>
+
+        {loadError ? (
+          <p className="flex flex-wrap items-center gap-2 text-xs text-destructive">
+            Could not load the stored fields. {loadError}
+            <button
+              type="button"
+              onClick={() => setAttempt((current) => current + 1)}
+              className="underline underline-offset-2"
+            >
+              Try again
+            </button>
+          </p>
+        ) : loaded ? null : (
+          <p className="text-xs text-muted-foreground">Loading the stored fields…</p>
+        )}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="vault-edit-label">Label</Label>
+            <Input
+              id="vault-edit-label"
+              value={fields.label}
+              onChange={(event) => setField("label", event.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="vault-edit-kind">Kind</Label>
+            <Select
+              value={fields.kind}
+              onValueChange={(value) => {
+                setField("kind", value as Kind);
+                if (value !== "url") setField("urlKind", "api_base");
+              }}
+            >
+              <SelectTrigger id="vault-edit-kind">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {KINDS.map((choice) => (
+                  <SelectItem key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="vault-edit-username">Username</Label>
+            <Input
+              id="vault-edit-username"
+              value={fields.username}
+              onChange={(event) => setField("username", event.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="vault-edit-url">URL</Label>
+            <Input
+              id="vault-edit-url"
+              value={fields.url}
+              onChange={(event) => setField("url", event.target.value)}
+              placeholder="https://"
+            />
+          </div>
+          {fields.kind === "url" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="vault-edit-url-kind">URL kind</Label>
+              <Select
+                value={fields.urlKind}
+                onValueChange={(value) => setField("urlKind", value as UrlKind)}
+              >
+                <SelectTrigger id="vault-edit-url-kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {URL_KINDS.map((choice) => (
+                    <SelectItem key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="vault-edit-description">Description</Label>
+            <Input
+              id="vault-edit-description"
+              value={fields.description}
+              onChange={(event) => setField("description", event.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="vault-edit-secret">Secret</Label>
+            <Input
+              id="vault-edit-secret"
+              type="password"
+              autoComplete="off"
+              value={secret}
+              onChange={(event) => setSecret(event.target.value)}
+            />
+            <p className="text-[11px] text-muted-foreground">Leave blank to keep the current secret.</p>
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="vault-edit-notes">Notes</Label>
+            <Input
+              id="vault-edit-notes"
+              value={fields.notes}
+              onChange={(event) => setField("notes", event.target.value)}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            data-testid="vault-edit-save"
+            disabled={busy || !loaded}
+            onClick={() => void save()}
+          >
+            {busy ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
