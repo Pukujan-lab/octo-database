@@ -174,6 +174,9 @@ const SCOPES = [
   { value: "workspace", label: "This workspace" },
 ] as const;
 
+/** Rows per page. A service with fewer keys still shows a footer, so the shape never jumps. */
+const PAGE_SIZE = 50;
+
 type Scope = (typeof SCOPES)[number]["value"];
 type SortKey = "label" | "kind" | "health" | "newest";
 type SortDir = "asc" | "desc";
@@ -324,9 +327,9 @@ export function VaultView({
       >
         <p className="max-w-3xl px-5 py-4 text-sm leading-relaxed text-muted-foreground">
           Everything you keep for an agent lives here. Account keys follow you into every workspace;
-          workspace keys stay on the one you assign. Search the table, sort it, or open a key's routes to
-          see where an agent can send it. When it is time to hand a cabinet over, mint a temporary grant
-          and give the agent that — never the stored secret.
+          workspace keys stay on the one you assign. Pick a service to narrow the list, search within it, or
+          open a key's routes to see where an agent can send it. When it is time to hand a cabinet over, mint a
+          temporary grant and give the agent that — never the stored secret.
         </p>
       </Panel>
 
@@ -778,9 +781,9 @@ function Cabinet({
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [openRoutes, setOpenRoutes] = useState<string | null>(null);
 
-  // Groups start open; the set holds the ones the owner closed.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  /** Service scope picked in the rail. null means every service. */
+  const [service, setService] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const [addOpen, setAddOpen] = useState<boolean | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -790,9 +793,29 @@ function Cabinet({
   // Closed once the cabinet holds keys, open while it is still empty.
   const addFormOpen = addOpen ?? items.length === 0;
 
+  /** Rail index: every service in the cabinet at its unfiltered size, so the counts never move. */
+  const services = useMemo(() => {
+    const buckets = new Map<string, VaultItem[]>();
+    for (const item of items) {
+      const name = item.group || "ungrouped";
+      const bucket = buckets.get(name);
+      if (bucket) bucket.push(item);
+      else buckets.set(name, [item]);
+    }
+    return [...buckets.entries()]
+      .map(([name, groupItems]) => ({ name, items: groupItems }))
+      .sort((a, b) => displayGroup(a.name).localeCompare(displayGroup(b.name)));
+  }, [items]);
+
+  /** The selected service's keys, before search and dropdowns narrow them further. */
+  const scopeItems = useMemo(
+    () => (service ? items.filter((item) => (item.group || "ungrouped") === service) : items),
+    [items, service],
+  );
+
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase();
-    const matches = items.filter((item) => {
+    const matches = scopeItems.filter((item) => {
       if (kindFilter !== "all" && item.kind !== kindFilter) return false;
       if (healthFilter !== "all" && item.healthStatus !== healthFilter) return false;
       if (!needle) return true;
@@ -805,73 +828,57 @@ function Cabinet({
       if (sortKey === "newest") return (timeOf(a.createdAt) - timeOf(b.createdAt)) * direction;
       return a.label.localeCompare(b.label) * direction;
     });
-  }, [items, filter, kindFilter, healthFilter, sortKey, sortDir]);
+  }, [scopeItems, filter, kindFilter, healthFilter, sortKey, sortDir]);
 
-  const filtersActive = filter.trim().length > 0 || kindFilter !== "all" || healthFilter !== "all";
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = visible.slice(pageStart, pageStart + PAGE_SIZE);
 
-  /** Only groups with surviving rows exist here, so a fully filtered-out group leaves no header behind. */
-  const groups = useMemo(() => {
-    const buckets = new Map<string, VaultItem[]>();
-    for (const item of visible) {
-      const name = item.group || "ungrouped";
-      const bucket = buckets.get(name);
-      if (bucket) bucket.push(item);
-      else buckets.set(name, [item]);
-    }
-    return [...buckets.entries()]
-      .map(([name, groupItems]) => ({ name, items: groupItems }))
-      .sort((a, b) => displayGroup(a.name).localeCompare(displayGroup(b.name)));
-  }, [visible]);
+  const scopeLabel = service ? displayGroup(service) : "All services";
+  const scopeCount =
+    visible.length === scopeItems.length
+      ? `${scopeItems.length} key${scopeItems.length === 1 ? "" : "s"}`
+      : `${visible.length} of ${scopeItems.length} keys`;
+  const rangeLabel = `${visible.length === 0 ? 0 : pageStart + 1}–${pageStart + pageRows.length} of ${visible.length}`;
+
+  /** Chips are the same filter model the controls drive, one per active narrowing. */
+  const chips: Array<{ key: string; label: string; clear: () => void }> = [];
+  if (filter.trim()) {
+    chips.push({ key: "search", label: `“${filter.trim()}”`, clear: () => setFilter("") });
+  }
+  if (kindFilter !== "all") {
+    chips.push({
+      key: "kind",
+      label: KINDS.find((choice) => choice.value === kindFilter)?.label ?? kindFilter,
+      clear: () => setKindFilter("all"),
+    });
+  }
+  if (healthFilter !== "all") {
+    chips.push({
+      key: "health",
+      label: HEALTHS.find((choice) => choice.value === healthFilter)?.label ?? healthFilter,
+      clear: () => setHealthFilter("all"),
+    });
+  }
+  if (service) {
+    chips.push({ key: "service", label: displayGroup(service), clear: () => setService(null) });
+  }
 
   const bulkLines = bulkText.split("\n").map((line) => line.trim()).filter(Boolean);
+
+  /** Any change to search, a dropdown or the service scope puts the list back on page 1. */
+  function narrow(apply: () => void) {
+    apply();
+    setPage(1);
+  }
 
   function clearFilters() {
     setFilter("");
     setKindFilter("all");
     setHealthFilter("all");
-    setCollapsed(new Set());
-  }
-
-  /** A new filter should never hide its own matches inside a closed group. */
-  function openEverything() {
-    setCollapsed(new Set());
-  }
-
-  function expandAll() {
-    setCollapsed(new Set());
-    setActiveGroup(null);
-  }
-
-  function collapseAll() {
-    setCollapsed(new Set(groups.map((group) => group.name)));
-    setActiveGroup(null);
-  }
-
-  function toggleGroup(name: string) {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  }
-
-  /** Rail click: open the group and scroll to it, or close it if it is already the active one. */
-  function activateGroup(name: string) {
-    if (activeGroup === name) {
-      setActiveGroup(null);
-      setCollapsed((current) => new Set(current).add(name));
-      return;
-    }
-    setActiveGroup(name);
-    setCollapsed((current) => {
-      const next = new Set(current);
-      next.delete(name);
-      return next;
-    });
-    requestAnimationFrame(() => {
-      document.getElementById(`${idPrefix}-group-${name}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+    setService(null);
+    setPage(1);
   }
 
   function toggleSort(key: SortKey) {
@@ -1198,28 +1205,19 @@ function Cabinet({
           />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
               <div className="relative min-w-[180px] flex-1">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   data-testid={`${idPrefix}-filter`}
                   value={filter}
-                  onChange={(event) => {
-                    setFilter(event.target.value);
-                    openEverything();
-                  }}
+                  onChange={(event) => narrow(() => setFilter(event.target.value))}
                   placeholder="Search label, description or url"
                   aria-label="Filter keys"
                   className="h-8 bg-background pl-8 text-sm"
                 />
               </div>
-              <Select
-                value={kindFilter}
-                onValueChange={(value) => {
-                  setKindFilter(value as KindFilter);
-                  openEverything();
-                }}
-              >
+              <Select value={kindFilter} onValueChange={(value) => narrow(() => setKindFilter(value as KindFilter))}>
                 <SelectTrigger className="h-8 w-[116px] bg-background text-xs" aria-label="Filter by kind">
                   <SelectValue />
                 </SelectTrigger>
@@ -1234,10 +1232,7 @@ function Cabinet({
               </Select>
               <Select
                 value={healthFilter}
-                onValueChange={(value) => {
-                  setHealthFilter(value as HealthFilter);
-                  openEverything();
-                }}
+                onValueChange={(value) => narrow(() => setHealthFilter(value as HealthFilter))}
               >
                 <SelectTrigger className="h-8 w-[126px] bg-background text-xs" aria-label="Filter by health">
                   <SelectValue />
@@ -1256,7 +1251,7 @@ function Cabinet({
                 size="sm"
                 variant={sortKey === "newest" ? "default" : "outline"}
                 className="h-8 gap-1.5 text-xs"
-                onClick={() => toggleSort("newest")}
+                onClick={() => narrow(() => toggleSort("newest"))}
               >
                 {sortKey === "newest" && sortDir === "asc" ? (
                   <ArrowUp className="h-3.5 w-3.5" />
@@ -1265,47 +1260,61 @@ function Cabinet({
                 )}
                 Newest
               </Button>
-              <div className="inline-flex overflow-hidden rounded-md border border-border">
-                <button
-                  type="button"
-                  onClick={expandAll}
-                  className="h-8 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  Expand all
-                </button>
-                <button
-                  type="button"
-                  onClick={collapseAll}
-                  className="h-8 border-l border-border px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  Collapse all
-                </button>
-              </div>
-              <span className="num ml-auto text-xs text-muted-foreground">
-                {visible.length} of {items.length}
-              </span>
-              {filtersActive ? (
-                <Button type="button" size="sm" variant="ghost" className="h-8 text-xs" onClick={clearFilters}>
-                  Clear
-                </Button>
-              ) : null}
             </div>
 
+            {chips.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-2">
+                {chips.map((chip) => (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    onClick={() => narrow(chip.clear)}
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-accent"
+                  >
+                    {chip.label}
+                    <X className="h-3 w-3 text-muted-foreground" />
+                    <span className="sr-only">remove this filter</span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="ml-1 text-[11px] text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
+                >
+                  Clear all
+                </button>
+              </div>
+            ) : null}
+
             <div className="lg:flex lg:items-start">
-              {/* Index rail: beside the table on lg, a chip row above it on narrow screens. */}
+              {/* Scope rail: picks the service the table shows. A chip row above the table on narrow screens. */}
               <nav
                 aria-label="Services"
-                className="flex shrink-0 items-center gap-1.5 overflow-x-auto px-4 py-2 lg:sticky lg:top-[76px] lg:max-h-[calc(100vh-96px)] lg:w-[176px] lg:flex-col lg:items-stretch lg:gap-0.5 lg:overflow-x-hidden lg:overflow-y-auto lg:border-r lg:border-border lg:px-3 lg:py-3"
+                className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border px-4 py-2 lg:sticky lg:top-[76px] lg:max-h-[calc(100vh-96px)] lg:w-[176px] lg:flex-col lg:items-stretch lg:gap-0.5 lg:overflow-x-hidden lg:overflow-y-auto lg:border-b-0 lg:border-r lg:px-3 lg:py-3"
               >
                 <p className="eyebrow hidden px-2 pb-1.5 lg:block">Services</p>
-                {groups.map((group) => {
-                  const active = activeGroup === group.name;
+                <button
+                  type="button"
+                  aria-pressed={service === null}
+                  onClick={() => narrow(() => setService(null))}
+                  className={cn(
+                    "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors lg:w-full",
+                    service === null
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  )}
+                >
+                  <span className="truncate">All services</span>
+                  <span className="num ml-auto text-[11px] text-muted-foreground/80">{items.length}</span>
+                </button>
+                {services.map((group) => {
+                  const active = service === group.name;
                   return (
                     <button
                       key={group.name}
                       type="button"
-                      onClick={() => activateGroup(group.name)}
                       aria-pressed={active}
+                      onClick={() => narrow(() => setService(active ? null : group.name))}
                       className={cn(
                         "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors lg:w-full",
                         active
@@ -1315,10 +1324,7 @@ function Cabinet({
                     >
                       <span className="truncate">{displayGroup(group.name)}</span>
                       {groupNeedsAttention(group.items) ? (
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-                          title="has a weak or stale key"
-                        />
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" title="has a weak or stale key" />
                       ) : null}
                       <span className="num ml-auto text-[11px] text-muted-foreground/80">{group.items.length}</span>
                     </button>
@@ -1326,171 +1332,169 @@ function Cabinet({
                 })}
               </nav>
 
-              <div className="min-w-0 flex-1" data-testid={`${idPrefix}-items`}>
-                {/* Stacked on narrow screens, a real table from md up. */}
-                <table className="data-table block md:table">
-                  <thead className="hidden md:table-header-group">
-                    <tr>
-                      <th aria-sort={sortKey === "label" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
-                        <SortHeader column="label" label="Key" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                      </th>
-                      <th
-                        className="w-[104px]"
-                        aria-sort={sortKey === "kind" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-                      >
-                        <SortHeader column="kind" label="Kind" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                      </th>
-                      <th
-                        className="w-[128px]"
-                        aria-sort={sortKey === "health" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-                      >
-                        <SortHeader
-                          column="health"
-                          label="Health"
-                          sortKey={sortKey}
-                          sortDir={sortDir}
-                          onSort={toggleSort}
-                        />
-                      </th>
-                      <th className="w-12 text-right">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="block md:table-row-group">
-                  {groups.length === 0 ? (
-                    <tr className="block md:table-row">
-                      <td colSpan={4} className="block px-4 py-6 text-sm text-muted-foreground md:table-cell md:px-5">
-                        No keys match these filters.{" "}
-                        <button type="button" className="underline underline-offset-2" onClick={clearFilters}>
-                          Clear
-                        </button>
-                      </td>
-                    </tr>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-2">
+                  <p className="flex items-baseline gap-2">
+                    <span className="font-display text-sm font-semibold text-foreground">{scopeLabel}</span>
+                    <span className="num text-xs text-muted-foreground">{scopeCount}</span>
+                  </p>
+                  <span className="num text-xs text-muted-foreground">{rangeLabel}</span>
+                </div>
+
+                <div data-testid={`${idPrefix}-items`}>
+                  {visible.length === 0 ? (
+                    <EmptyState
+                      motif="keys"
+                      title="No keys match these filters"
+                      description="Nothing in this scope survives the search and the dropdowns."
+                      action={
+                        <Button type="button" variant="outline" onClick={clearFilters}>
+                          Clear filters
+                        </Button>
+                      }
+                    />
                   ) : (
-                    groups.map((group) => {
-                      const expanded = !collapsed.has(group.name);
-                      return (
-                        <Fragment key={group.name}>
-                          <tr
-                            id={`${idPrefix}-group-${group.name}`}
-                            className="block scroll-mt-24 bg-muted/40 hover:bg-muted/60 md:table-row"
+                    <table className="data-table block md:table">
+                      <thead className="hidden md:table-header-group">
+                        <tr>
+                          <th
+                            className="md:sticky md:top-0 md:z-10 md:bg-muted lg:top-[73px]"
+                            aria-sort={sortKey === "label" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
                           >
-                            <td colSpan={4} className="block border-b border-border p-0 md:table-cell">
-                              <button
-                                type="button"
-                                onClick={() => toggleGroup(group.name)}
-                                aria-expanded={expanded}
-                                className="flex w-full items-center gap-2 px-4 py-2 text-left md:px-5"
-                              >
-                                <ChevronRight
-                                  className={cn(
-                                    "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
-                                    expanded && "rotate-90",
-                                  )}
-                                />
-                                <span className="font-display text-[13px] font-semibold text-foreground">
-                                  {displayGroup(group.name)}
-                                </span>
-                                <span className="num text-[11px] text-muted-foreground">{group.items.length}</span>
-                                {groupNeedsAttention(group.items) ? (
-                                  <span
-                                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-                                    title="has a weak or stale key"
-                                  />
-                                ) : null}
-                                <span className="ml-auto text-[11px] text-muted-foreground">
-                                  {expanded ? "hide" : "show"}
-                                </span>
-                              </button>
-                            </td>
-                          </tr>
-                          {expanded
-                            ? group.items.map((item) => {
-                                const routesOpen = openRoutes === item.id;
-                                return (
-                                  <Fragment key={item.id}>
-                                    <tr className="relative block border-b border-border/70 transition-colors hover:bg-accent/40 md:table-row">
-                                      <td className="block px-4 py-3 pr-12 align-middle md:table-cell md:px-5 md:py-2.5 md:pr-4">
-                                        <div className="flex items-start gap-2">
-                                          {canHaveRoutes(item) ? (
-                                            <button
-                                              type="button"
-                                              data-testid={`vault-routes-${item.id}-toggle`}
-                                              aria-expanded={routesOpen}
-                                              aria-label={routesOpen ? "Hide routes" : "Show routes"}
-                                              onClick={() => toggleRoutes(item.id)}
-                                              className="-ml-1 mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                            >
-                                              <ChevronRight
-                                                className={cn(
-                                                  "h-3.5 w-3.5 transition-transform",
-                                                  routesOpen && "rotate-90",
-                                                )}
-                                              />
-                                            </button>
-                                          ) : (
-                                            <span className="mt-0.5 hidden h-5 w-4 shrink-0 md:block" />
-                                          )}
-                                          <div className="min-w-0">
-                                            <p className="truncate text-sm font-medium leading-5 text-foreground">
-                                              {item.label}
-                                            </p>
-                                            {item.description && item.description !== item.label ? (
-                                              <p className="truncate text-xs leading-5 text-muted-foreground">
-                                                {item.description}
-                                              </p>
-                                            ) : null}
-                                            {item.url ? (
-                                              <p className="num truncate text-[11px] leading-4 text-muted-foreground/80">
-                                                {item.url}
-                                              </p>
-                                            ) : null}
-                                            <div className="mt-1 flex flex-wrap items-center gap-1.5 md:hidden">
-                                              <StatusPill tone="muted">{item.kind}</StatusPill>
-                                              <HealthMark item={item} />
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </td>
-                                      <td className="hidden align-middle md:table-cell md:w-[104px] md:px-4 md:py-2.5">
-                                        <span
-                                          title={
-                                            item.kindSource === "inferred" ? "kind read from the label" : undefined
-                                          }
-                                        >
-                                          <StatusPill tone="muted">{item.kind}</StatusPill>
-                                        </span>
-                                      </td>
-                                      <td className="hidden align-middle md:table-cell md:w-[128px] md:px-4 md:py-2.5">
-                                        <HealthMark item={item} />
-                                      </td>
-                                      <td className="absolute right-1 top-2 p-0 md:static md:table-cell md:w-12 md:px-4 md:py-2.5 md:text-right">
-                                        {rowMenu(item)}
-                                      </td>
-                                    </tr>
-                                    {routesOpen ? (
-                                      <tr className="block bg-muted/30 md:table-row">
-                                        <td colSpan={4} className="block p-0 md:table-cell">
-                                          <ItemRoutes
-                                            item={item}
-                                            gate={gate}
-                                            onError={onError}
-                                            onChanged={onSaved}
-                                          />
-                                        </td>
-                                      </tr>
+                            <SortHeader column="label" label="Key" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                          </th>
+                          <th
+                            className="w-[104px] md:sticky md:top-0 md:z-10 md:bg-muted lg:top-[73px]"
+                            aria-sort={sortKey === "kind" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+                          >
+                            <SortHeader column="kind" label="Kind" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                          </th>
+                          <th
+                            className="w-[128px] md:sticky md:top-0 md:z-10 md:bg-muted lg:top-[73px]"
+                            aria-sort={sortKey === "health" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+                          >
+                            <SortHeader
+                              column="health"
+                              label="Health"
+                              sortKey={sortKey}
+                              sortDir={sortDir}
+                              onSort={toggleSort}
+                            />
+                          </th>
+                          <th className="w-12 text-right md:sticky md:top-0 md:z-10 md:bg-muted lg:top-[73px]">
+                            <span className="sr-only">Actions</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="block md:table-row-group">
+                        {pageRows.map((item) => {
+                          const routesOpen = openRoutes === item.id;
+                          // One line per key: label, then description and url, each truncated on its own.
+                          const blurb =
+                            item.description && item.description !== item.label ? item.description : null;
+                          return (
+                            <Fragment key={item.id}>
+                              <tr className="relative block border-b border-border/70 transition-colors md:table-row">
+                                <td className="block px-4 py-2.5 pr-12 align-middle md:table-cell md:px-4 md:py-2.5">
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    {canHaveRoutes(item) ? (
+                                      <button
+                                        type="button"
+                                        data-testid={`vault-routes-${item.id}-toggle`}
+                                        aria-expanded={routesOpen}
+                                        aria-label={routesOpen ? "Hide routes" : "Show routes"}
+                                        onClick={() => toggleRoutes(item.id)}
+                                        className="-ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                      >
+                                        <ChevronRight
+                                          className={cn("h-3.5 w-3.5 transition-transform", routesOpen && "rotate-90")}
+                                        />
+                                      </button>
+                                    ) : (
+                                      <span className="hidden h-5 w-4 shrink-0 md:block" />
+                                    )}
+                                    <p className="num max-w-full shrink-0 truncate text-[13px] font-medium leading-5 text-foreground md:max-w-[46%]">
+                                      {item.label}
+                                    </p>
+                                    {blurb ? (
+                                      <p className="hidden min-w-0 flex-1 truncate text-xs leading-5 text-muted-foreground md:block">
+                                        {blurb}
+                                      </p>
                                     ) : null}
-                                  </Fragment>
-                                );
-                              })
-                            : null}
-                        </Fragment>
-                      );
-                    })
+                                    {item.url ? (
+                                      <p className="num hidden max-w-[30%] shrink-0 truncate text-[11px] leading-5 text-muted-foreground/80 lg:block">
+                                        {item.url}
+                                      </p>
+                                    ) : null}
+                                </div>
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5 md:hidden">
+                                  <StatusPill tone="muted">{item.kind}</StatusPill>
+                                  <HealthMark item={item} />
+                                </div>
+                              </td>
+                              <td className="hidden align-middle md:table-cell md:w-[104px] md:px-4 md:py-2">
+                                <span title={item.kindSource === "inferred" ? "kind read from the label" : undefined}>
+                                  <StatusPill tone="muted">{item.kind}</StatusPill>
+                                </span>
+                              </td>
+                              <td className="hidden align-middle md:table-cell md:w-[128px] md:px-4 md:py-2">
+                                <HealthMark item={item} />
+                              </td>
+                              <td className="absolute right-1 top-1.5 p-0 md:static md:table-cell md:w-12 md:px-4 md:py-2 md:text-right">
+                                {rowMenu(item)}
+                              </td>
+                              </tr>
+                              {routesOpen ? (
+                                <tr className="block bg-muted/30 md:table-row">
+                                  <td colSpan={4} className="block p-0 md:table-cell">
+                                    <ItemRoutes
+                                      item={item}
+                                      gate={gate}
+                                      onError={onError}
+                                      onChanged={onSaved}
+                                      onReveal={() => void reveal(item)}
+                                    />
+                                  </td>
+                                </tr>
+                              ) : null}
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   )}
-                  </tbody>
-                </table>
+                </div>
+
+                {visible.length === 0 ? null : (
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2.5">
+                    <span className="num text-xs text-muted-foreground">{rangeLabel}</span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={currentPage <= 1}
+                        onClick={() => setPage(currentPage - 1)}
+                      >
+                        Previous
+                      </Button>
+                      <span className="num text-xs text-muted-foreground">
+                        Page {currentPage} of {pageCount}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={currentPage >= pageCount}
+                        onClick={() => setPage(currentPage + 1)}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </>
@@ -1505,13 +1509,17 @@ function ItemRoutes({
   gate,
   onError,
   onChanged,
+  onReveal,
 }: {
   item: VaultItem;
   gate: GateBody;
   onError: (error: unknown) => void;
   onChanged: () => void;
+  onReveal: () => void;
 }) {
   const queryClient = useQueryClient();
+  // The route form stays shut until asked for: most keys have no routes at all.
+  const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [authScheme, setAuthScheme] = useState<AuthScheme>("bearer");
@@ -1552,6 +1560,7 @@ function ItemRoutes({
       setBodyField("");
       setBasicUsername("");
       setRouteKey("");
+      setFormOpen(false);
       toast.success("Route added");
       await queryClient.invalidateQueries({ queryKey: ["vault-routes", item.id] });
       onChanged();
@@ -1576,13 +1585,33 @@ function ItemRoutes({
   }
 
   return (
-    <div className="space-y-2 p-4 md:px-5" data-testid={`vault-routes-${item.id}`}>
+    <div className="space-y-2.5 px-4 py-3 md:px-5" data-testid={`vault-routes-${item.id}`}>
+      {/* Opening a row should tell you something even when it has no routes. */}
+      {item.url || item.hasNotes || (item.description && item.description !== item.label) ? (
+        <div className="space-y-1">
+          {item.url ? <p className="num truncate text-[11px] text-muted-foreground">{item.url}</p> : null}
+          {item.description && item.description !== item.label ? (
+            <p className="text-xs leading-relaxed text-muted-foreground">{item.description}</p>
+          ) : null}
+          {item.hasNotes ? (
+            <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+              Notes attached.
+              <button
+                type="button"
+                onClick={onReveal}
+                className="underline underline-offset-2 transition-colors hover:text-foreground"
+              >
+                Show
+              </button>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {routesQuery.isPending ? (
-        <div className="h-10 animate-pulse rounded-md bg-muted" />
+        <div className="h-8 animate-pulse rounded-md bg-muted" />
       ) : routes.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          No routes yet. Add the vendor base URL an agent should call.
-        </p>
+        <p className="text-xs text-muted-foreground">No routes yet.</p>
       ) : (
         <ul className="space-y-1.5">
           {routes.map((route) => (
@@ -1608,74 +1637,93 @@ function ItemRoutes({
         </ul>
       )}
 
-      <div className="grid gap-2 sm:grid-cols-2">
-        <Input
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Route name, e.g. Fish Audio API"
-          aria-label="Route name"
-          className="h-8 bg-background text-sm"
-        />
-        <Input
-          value={baseUrl}
-          onChange={(event) => setBaseUrl(event.target.value)}
-          placeholder="Base URL, e.g. https://api.fish.audio"
-          aria-label="Base URL"
-          className="h-8 bg-background text-sm"
-        />
-        <Select value={authScheme} onValueChange={(value) => setAuthScheme(value as AuthScheme)}>
-          <SelectTrigger aria-label="Auth scheme" className="h-8 bg-background text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {SCHEMES.map((scheme) => (
-              <SelectItem key={scheme.value} value={scheme.value}>
-                {scheme.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {authScheme === "x-api-key" || authScheme === "query" ? (
-          <Input
-            value={authHeader}
-            onChange={(event) => setAuthHeader(event.target.value)}
-            placeholder={authScheme === "query" ? "Query parameter, e.g. api_key" : "Header, e.g. x-api-key"}
-            aria-label="Auth header or query parameter"
-            className="h-8 bg-background text-sm"
-          />
-        ) : null}
-        {authScheme === "body_json" || authScheme === "path" ? (
-          <Input
-            value={bodyField}
-            onChange={(event) => setBodyField(event.target.value)}
-            placeholder={authScheme === "path" ? "Path template, e.g. bot{key}/getMe" : "Body field, e.g. api_key"}
-            aria-label="Body field or path template"
-            className="h-8 bg-background text-sm"
-          />
-        ) : null}
-        {authScheme === "basic" ? (
-          <Input
-            value={basicUsername}
-            onChange={(event) => setBasicUsername(event.target.value)}
-            placeholder="Basic username (optional)"
-            aria-label="Basic username"
-            className="h-8 bg-background text-sm"
-          />
-        ) : null}
-        <Input
-          value={routeKey}
-          onChange={(event) => setRouteKey(event.target.value)}
-          placeholder="Route key (optional, auto-generated)"
-          aria-label="Route key"
-          className="h-8 bg-background text-sm"
-        />
-        <Button type="button" size="sm" className="h-8 text-xs" disabled={busy} onClick={() => void add()}>
+      {formOpen ? (
+        <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Route name, e.g. Fish Audio API"
+              aria-label="Route name"
+              className="h-8 bg-background text-sm"
+            />
+            <Input
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              placeholder="Base URL, e.g. https://api.fish.audio"
+              aria-label="Base URL"
+              className="h-8 bg-background text-sm"
+            />
+            <Select value={authScheme} onValueChange={(value) => setAuthScheme(value as AuthScheme)}>
+              <SelectTrigger aria-label="Auth scheme" className="h-8 bg-background text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SCHEMES.map((scheme) => (
+                  <SelectItem key={scheme.value} value={scheme.value}>
+                    {scheme.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {authScheme === "x-api-key" || authScheme === "query" ? (
+              <Input
+                value={authHeader}
+                onChange={(event) => setAuthHeader(event.target.value)}
+                placeholder={authScheme === "query" ? "Query parameter, e.g. api_key" : "Header, e.g. x-api-key"}
+                aria-label="Auth header or query parameter"
+                className="h-8 bg-background text-sm"
+              />
+            ) : null}
+            {authScheme === "body_json" || authScheme === "path" ? (
+              <Input
+                value={bodyField}
+                onChange={(event) => setBodyField(event.target.value)}
+                placeholder={authScheme === "path" ? "Path template, e.g. bot{key}/getMe" : "Body field, e.g. api_key"}
+                aria-label="Body field or path template"
+                className="h-8 bg-background text-sm"
+              />
+            ) : null}
+            {authScheme === "basic" ? (
+              <Input
+                value={basicUsername}
+                onChange={(event) => setBasicUsername(event.target.value)}
+                placeholder="Basic username (optional)"
+                aria-label="Basic username"
+                className="h-8 bg-background text-sm"
+              />
+            ) : null}
+            <Input
+              value={routeKey}
+              onChange={(event) => setRouteKey(event.target.value)}
+              placeholder="Route key (optional, auto-generated)"
+              aria-label="Route key"
+              className="h-8 bg-background text-sm"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" className="h-8 text-xs" disabled={busy} onClick={() => void add()}>
+              Add route
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 text-xs"
+              onClick={() => setFormOpen(false)}
+            >
+              Cancel
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              An agent attaches its working key where the vendor expects it and points its client at the relay URL.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => setFormOpen(true)}>
           Add route
         </Button>
-      </div>
-      <p className="text-[11px] text-muted-foreground">
-        An agent attaches its working key where the vendor expects it and points its client at the relay URL.
-      </p>
+      )}
     </div>
   );
 }
