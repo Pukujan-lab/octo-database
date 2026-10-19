@@ -51,13 +51,23 @@ export async function handleAuthRoutes(
     const origin = getPublicOrigin(req, url);
     const errorParam = url.searchParams.get('error');
     if (errorParam) {
-      console.warn('Google auth callback returned an error:', errorParam);
+      console.warn(
+        'Google auth callback returned an error:',
+        errorParam,
+        url.searchParams.get('error_description') ?? ''
+      );
       res.writeHead(302, { Location: `${origin}/#auth_error=${encodeURIComponent(errorParam)}` });
       res.end();
       return true;
     }
     const code = url.searchParams.get('code');
     if (!code) {
+      const queryKeys = url.searchParams
+        .toString()
+        .split('&')
+        .map((pair) => pair.split('=')[0])
+        .filter(Boolean);
+      console.warn('Google auth callback arrived without a code; query keys:', queryKeys);
       res.writeHead(302, { Location: `${origin}/#auth_error=MISSING_CODE` });
       res.end();
       return true;
@@ -130,6 +140,7 @@ export async function handleAuthRoutes(
       }
 
       if (!sub || !email) {
+        console.warn('Google profile incomplete:', { hasSub: Boolean(sub), hasEmail: Boolean(email) });
         res.writeHead(302, { Location: `${origin}/#auth_error=MISSING_PROFILE` });
         res.end();
         return true;
@@ -155,6 +166,11 @@ export async function handleAuthRoutes(
         await dbInsertMembership(ws.id, principal.id, 'owner');
       }
 
+      console.log('Google sign-in completed:', {
+        principalId: principal.id,
+        isPlatformOwner: principal.isPlatformOwner,
+        provisionedWorkspace: workspaces.length === 0,
+      });
       res.writeHead(302, { Location: `${origin}/#token=${signSessionToken(principal.id)}` });
       res.end();
       return true;

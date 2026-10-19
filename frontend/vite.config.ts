@@ -43,5 +43,9 @@ export default defineConfig(() => ({
   build: {
     outDir: path.resolve(__dirname, "../dist"),
     emptyOutDir: true,
+    // Not the default assets/: the edge cached a 404 for a live bundle URL during
+    // a container swap, and a content-hashed name stays poisoned until its
+    // directory changes.
+    assetsDir: "static",
   },
 }));
