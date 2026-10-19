@@ -40,9 +40,15 @@
     # Static Vite build with SPA routing fallback. Hashed assets never change, so
     # they are immutable; the HTML shell must revalidate so a new deploy is picked
     # up on the next load instead of running a bundle from a previous deploy.
-    handle /assets/* {
+    # The long-lived header is matched on the file actually existing: a deploy
+    # briefly answers 404 for a new bundle, and an immutable 404 stays in the
+    # edge cache long after the file lands.
+    handle /static/* {
         root * /srv
-        header Cache-Control "public, max-age=31536000, immutable"
+        @present file {path}
+        header @present Cache-Control "public, max-age=31536000, immutable"
+        @absent not file {path}
+        header @absent Cache-Control "no-store"
         file_server
     }
 
