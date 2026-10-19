@@ -51,6 +51,7 @@ export async function handleAuthRoutes(
     const origin = getPublicOrigin(req, url);
     const errorParam = url.searchParams.get('error');
     if (errorParam) {
+      console.warn('Google auth callback returned an error:', errorParam);
       res.writeHead(302, { Location: `${origin}/#auth_error=${encodeURIComponent(errorParam)}` });
       res.end();
       return true;

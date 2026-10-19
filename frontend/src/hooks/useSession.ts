@@ -51,6 +51,10 @@ const AUTH_ERROR_COPY: Record<string, string> = {
   access_denied: "Google sign-in was cancelled. Please try again.",
   invalid_state: "That Google sign-in link expired. Please try again.",
   GOOGLE_AUTH_NOT_CONFIGURED: "Google sign-in is not configured on this server.",
+  TOKEN_EXCHANGE_FAILED:
+    "Google accepted the sign-in but the server could not complete the exchange. Please try again.",
+  MISSING_PROFILE: "Google did not return an email address for this account.",
+  MISSING_CODE: "Google returned without an authorization code. Please try again.",
 };
 
 export function useSession() {
@@ -98,7 +102,8 @@ export function useSession() {
 
     if (hash.authError) {
       stripHash();
-      setNotice(AUTH_ERROR_COPY[hash.authError] ?? "Sign-in failed. Please try again.");
+      const known = AUTH_ERROR_COPY[hash.authError];
+      setNotice(known ?? `Sign-in failed (${hash.authError}). Please try again.`);
       return;
     }
 
