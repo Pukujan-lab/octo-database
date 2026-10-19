@@ -45,6 +45,8 @@ describe('Octo MCP adapter', () => {
       'delete_document',
       'delete_file',
       'download_file',
+      'get_analytics_query_status',
+      'get_analytics_result',
       'get_document',
       'get_ops_summary',
       'graph_health',
@@ -58,10 +60,12 @@ describe('Octo MCP adapter', () => {
       'provision_database',
       'query_belief_as_of',
       'query_claims_as_of',
+      'query_dataset',
       'query_graph',
       'query_workspace',
       'query_workspace_database',
       'record_epistemic',
+      'register_dataset',
       'rename_document',
       'retry_job',
       'upload_file',
@@ -214,6 +218,77 @@ describe('Octo MCP adapter', () => {
 
     expect(calls).toEqual(['http://octo.test/api/jobs/j1/retry?workspaceId=w1']);
     expect(result.isError).toBeFalsy();
+  });
+
+  it('registers a dataset through the datasets route', async () => {
+    const calls: string[] = [];
+    const client = await connect(apiWith(201, '{"datasetVersion":{"id":"v1"},"created":true}', calls));
+
+    const result = await client.callTool({
+      name: 'register_dataset',
+      arguments: {
+        workspaceId: 'w1',
+        dataset: 'job-history',
+        schema: [
+          { name: 'job_type', type: 'TEXT' },
+          { name: 'state', type: 'TEXT' },
+          { name: 'created_at', type: 'TIMESTAMP' },
+        ],
+        provenance: { source: 'octo.jobs', exportedAt: '2026-10-19T00:00:00Z' },
+        parts: [{ partition: '2026-01-31', dataBase64: 'UEFS' }],
+      },
+    });
+
+    expect(calls).toEqual(['http://octo.test/api/workspaces/w1/datasets']);
+    expect(result.isError).toBeFalsy();
+    expect(textOf(result)).toContain('datasetVersion');
+  });
+
+  it('submits a named query and polls its job', async () => {
+    const calls: string[] = [];
+    const client = await connect(apiWith(201, '{"job":{"id":"j1"},"created":true}', calls));
+
+    await client.callTool({
+      name: 'query_dataset',
+      arguments: { workspaceId: 'w1', datasetVersionId: 'v1', querySpec: 'job-failures-by-type-month@1' },
+    });
+    await client.callTool({
+      name: 'get_analytics_query_status',
+      arguments: { workspaceId: 'w1', jobId: 'j1' },
+    });
+
+    expect(calls).toEqual([
+      'http://octo.test/api/workspaces/w1/analytics/queries',
+      'http://octo.test/api/workspaces/w1/analytics/queries/j1',
+    ]);
+  });
+
+  it('fetches a result artifact through the results route', async () => {
+    const calls: string[] = [];
+    const client = await connect(
+      apiWith(200, '{"result":{"id":"r1"},"downloadUrl":"/content","expiresInSeconds":0}', calls)
+    );
+
+    const result = await client.callTool({
+      name: 'get_analytics_result',
+      arguments: { workspaceId: 'w1', resultId: 'r1' },
+    });
+
+    expect(calls).toEqual(['http://octo.test/api/workspaces/w1/analytics/results/r1']);
+    expect(result.isError).toBeFalsy();
+    expect(textOf(result)).toContain('downloadUrl');
+  });
+
+  it('reports an unconfigured analytics engine as a tool error, not a success', async () => {
+    const client = await connect(apiWith(503, '{"error":"ANALYTICS_NOT_CONFIGURED"}'));
+
+    const result = await client.callTool({
+      name: 'query_dataset',
+      arguments: { workspaceId: 'w1', datasetVersionId: 'v1', querySpec: 'job-failures-by-type-month@1' },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('503');
   });
 
   it('reports a read-only key refused a retry as a tool error, not a success', async () => {
