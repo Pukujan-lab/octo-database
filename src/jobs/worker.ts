@@ -15,6 +15,7 @@ import { ObjectStore } from '../storage/object-store';
 import { ensureThumbnail } from '../media/thumbnail-service';
 import { ArchiveDeps, ArchiveFileRecord, archiveFile, restoreFile } from '../storage/archive-service';
 import { ClaimedJob, completeJob, failJob, recordActivity } from './job-service';
+import { AnalyticsJobDeps, runAnalyticsJob } from '../analytics/job';
 import type { GraphClient } from '../graph/falkordb-client';
 import { GRAPH_SCHEMA_VERSION, ProjectionInput, projectWorkspaceGraph } from '../graph/projector';
 import type { GraphProjectionRecord } from '../types/graph';
@@ -55,6 +56,11 @@ export interface WorkerDeps {
   archive?: ArchiveDeps;
   /** Graph projection wiring for `graph_rebuild` jobs. Absent outside the server. */
   graphProjection?: GraphProjectionDeps;
+  /**
+   * Analytics wiring for `analytics_query` jobs. The store comes from `store`;
+   * absent wiring means the surface is not configured on this worker.
+   */
+  analytics?: Omit<AnalyticsJobDeps, 'store'>;
   /** Loads the file record an archive/restore job targets. */
   loadArchiveTarget?: (workspaceId: string, fileId: string) => Promise<ArchiveFileRecord | null>;
   /**
@@ -241,6 +247,26 @@ export async function handleGraphProjectionJob(
   }
 }
 
+/**
+ * Handles one `analytics_query`: run the named spec with DuckDB over the
+ * immutable dataset version and register the result artifact. The workspace
+ * comes from the job, and the catalog row is the authority for the object keys.
+ */
+export async function handleAnalyticsQueryJob(
+  job: ClaimedJob,
+  deps: WorkerDeps
+): Promise<HandlerResult> {
+  if (!deps.analytics) {
+    return {
+      ok: false,
+      code: 'ANALYTICS_NOT_CONFIGURED',
+      summary: 'analytics is not configured on this worker',
+      retryable: false,
+    };
+  }
+  return runAnalyticsJob(job, { store: deps.store, ...deps.analytics });
+}
+
 /** Runs a single claimed job through its handler and records the outcome. */
 export async function processJob(job: ClaimedJob, deps: WorkerDeps): Promise<JobOutcome> {
   try {
@@ -254,6 +280,8 @@ export async function processJob(job: ClaimedJob, deps: WorkerDeps): Promise<Job
       outcome = await handleArchiveJob(job, deps, 'restore');
     } else if (job.jobType === 'graph_rebuild') {
       outcome = await handleGraphProjectionJob(job, deps);
+    } else if (job.jobType === 'analytics_query') {
+      outcome = await handleAnalyticsQueryJob(job, deps);
     } else {
       outcome = { ok: false, code: 'UNKNOWN_JOB_TYPE', summary: `No handler for job type ${job.jobType}`, retryable: false };
     }

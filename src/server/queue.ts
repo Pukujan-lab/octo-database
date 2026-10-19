@@ -5,7 +5,7 @@
  */
 
 import { JobOutcome, processJob } from '../jobs/worker';
-import { dbClaimJob, dbCompleteJob, dbEnqueueFileTransition, dbEnqueueJob, dbEpistemicWatermarkService, dbFailJob, dbGetArchiveRecord, dbHasOpenFileJob, dbListAgedActiveFiles, dbListRetentionWorkspaces, dbReadEpistemicGraphService, dbRecordActivity, dbRecordOpsEvent, dbUpsertGraphProjectionService } from './db';
+import { dbClaimJob, dbCompleteJob, dbEnqueueFileTransition, dbEnqueueJob, dbEpistemicWatermarkService, dbFailJob, dbGetArchiveRecord, dbGetDatasetVersion, dbHasOpenFileJob, dbListAgedActiveFiles, dbListRetentionWorkspaces, dbReadEpistemicGraphService, dbRecordActivity, dbRecordOpsEvent, dbRegisterAnalyticsResult, dbUpsertGraphProjectionService } from './db';
 import { loadArchiveRecord } from './present';
 import { archiveDeps, graphClient, objectStore } from './runtime';
 import { randomUUID } from 'crypto';
@@ -49,6 +49,19 @@ export async function drainQueueOnce(targetWorkspaceId?: string, maxJobs = 10): 
         watermark: (workspaceId) => dbEpistemicWatermarkService(workspaceId),
         record: (row) => dbUpsertGraphProjectionService(row),
       },
+      // An analytics job reads its immutable dataset version from the catalog and
+      // registers the derived result. Both go through the trusted pool for the
+      // same reason as the archive/graph jobs: the drain runs with no caller
+      // identity, and the job's workspace is the authority.
+      analytics: objectStore
+        ? {
+            loadVersion: (workspaceId, datasetVersionId) =>
+              dbGetDatasetVersion(workspaceId, datasetVersionId),
+            registerResult: async (input) => {
+              await dbRegisterAnalyticsResult(input);
+            },
+          }
+        : undefined,
       // Resolve the thumbnail target through the trusted service pool: the app
       // pool is RLS-fenced and the scheduler drain runs with no caller identity.
       // Pinning to the job's workspace is what stops a payload from pointing the
