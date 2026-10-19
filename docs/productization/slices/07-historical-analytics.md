@@ -1,6 +1,6 @@
 # Slice 7 — Historical Analytics (DuckDB and Parquet over R2 datasets)
 
-**Status: DRAFT — pending independent critique and owner acceptance. Not locked. Do not implement until the owner locks this packet on issue #13.** This is the merged, locked-format PDD/SDD/EVAL packet for the Slice 7 draft documents under `docs/productization/slices/07-historical-analytics/` (`PDD.md`, `SDD.md`, `TDD.md`, `DIFFERENTIAL.md`). The owning issue #13 is titled **"Slice 11 — DuckDB and Parquet analytical workspace over R2 datasets"** (OCTO-1100); `SLICE_MAP.md` orders the same work as **Slice 7**, and this packet uses "Slice 7" throughout. Robustness target: **Level 2**.
+**Status: LOCKED — owner accepted 2026-10-19.** This is the merged, locked-format PDD/SDD/EVAL packet for the Slice 7 draft documents under `docs/productization/slices/07-historical-analytics/` (`PDD.md`, `SDD.md`, `TDD.md`, `DIFFERENTIAL.md`). The owning issue #13 is titled **"Slice 11 — DuckDB and Parquet analytical workspace over R2 datasets"** (OCTO-1100); `SLICE_MAP.md` orders the same work as **Slice 7**, and this packet uses "Slice 7" throughout. Robustness target: **Level 2**.
 
 ## PDD
 
@@ -36,7 +36,7 @@
 - **No BI/analytics connector** (issue #13's "optional BI connection later" is not taken up here).
 - **No partition-pruning or performance guarantee.** Multi-file correctness is the claim; layout is a convention.
 - **No list-versions, delete-dataset, or catalog-browsing endpoints** beyond what the accepted job strictly needs.
-- **No SDK/CLI or MCP analytics client** — Slice 3.
+- **No SDK/CLI analytics client** — the MCP tools are in this slice (owner direction, 2026-10-19); an SDK/CLI wrapper is not.
 - **No large-object streaming or presigned direct upload.** Registration parts arrive as base64 in one JSON body, which is not size-limited in this slice; a large dataset registration is a known limitation. Streaming/multipart upload is a later concern.
 
 **Reuse:**
@@ -48,7 +48,7 @@
 
 **Observable success:**
 
-- A caller-registered multi-file Parquet dataset with input columns `(job_type TEXT, state TEXT, created_at TIMESTAMPTZ)` answers `job-failures-by-type-month@1` through the HTTP job API. The result Parquet has exactly the columns `(job_type, month, failure_count)` and rows equal to the aggregate computed **independently** in the test from the same registered rows, with `month = date_trunc('month', created_at AT TIME ZONE 'UTC')` and canonical order `ORDER BY job_type, month`.
+- A caller-registered multi-file Parquet dataset with input columns `(job_type TEXT, state TEXT, created_at TIMESTAMP)` answers `job-failures-by-type-month@1` through the HTTP job API. The result Parquet has exactly the columns `(job_type, month, failure_count)` and rows equal to the aggregate computed **independently** in the test from the same registered rows, with `month = date_trunc('month', CAST(created_at AS TIMESTAMP))` in a UTC session and canonical order `ORDER BY job_type, month`.
 - The result artifact is registered and re-fetchable through `GET /api/workspaces/<id>/analytics/results/<resultId>`; re-submitting under the same idempotency key returns the same job and does not create a duplicate result.
 - A key bound to another workspace is refused (`403`); a `datasetVersionId`/`resultId` not in the caller's workspace resolves to `404` with no existence leak.
 - Operational Postgres row counts and schema show only dataset/version/job/result metadata — bulk analytical rows never entered it.
@@ -149,7 +149,7 @@ type SubmitQueryResponse = {
 
 The server resolves `querySpec` from a server-side registry (`QUERY_SPECS`), builds the SQL itself, and enqueues the reserved `analytics_query` job through the existing jobs queue (`dbEnqueueJob`), whose unique constraint `(workspace_id, job_type, idempotency_key)` is the only dedupe mechanism. The job payload carries **ids only** — `{ datasetVersionId, querySpec, resultId }` — and no credential. `201` when a job was created, `200` with the existing job when the idempotency key repeats.
 
-**Authority-floor note (owner confirmation required):** this route requires `member` + `read` and enqueues a job, whereas the generic `POST /api/jobs` enqueue path requires `operator` (`src/server/index.ts`). That lower floor is deliberate for the single named read-only spec, but it is a deviation and is listed for owner confirmation.
+**Authority-floor note (confirmed at lock, 2026-10-19):** this route requires `member` + `read` and enqueues a job, whereas the generic `POST /api/jobs` enqueue path requires `operator` (`src/server/index.ts`). That lower floor is deliberate for the single named read-only spec; it does not expose the generic enqueue surface.
 
 **Fetch job/result status**
 
@@ -190,7 +190,7 @@ type AnalyticsResult = {
 type ResultResponse = { result: AnalyticsResult; downloadUrl: string; expiresInSeconds: number };
 ```
 
-`downloadUrl` is a short-lived presigned R2 URL minted server-side with `r2Provider.generatePresignedDownloadUrl(...)` — the same mechanism the file download route uses. Bytes go client-direct; no master credential is exposed. Result fetch uses **this dedicated route** (not `GET /api/files/download`, which requires a `files` catalog row via `dbGetFile` and the `files` scope).
+`downloadUrl` is a short-lived presigned R2 URL minted server-side with `r2Provider.generatePresignedDownloadUrl(...)` — the same mechanism the file download route uses. When no presigner exists (the explicit local backend used by CI/dev), it is the authenticated content route `GET /api/workspaces/:id/analytics/results/:resultId/content` and `expiresInSeconds` is `0`. Bytes go client-direct in production; no master credential is exposed. Result fetch uses **this dedicated route** (not `GET /api/files/download`, which requires a `files` catalog row via `dbGetFile` and the `files` scope).
 
 **Error codes** (stable; `error` is the code, `message` is readable):
 
@@ -213,11 +213,11 @@ Job-level failures (surfaced through the status route's `errorCode`, not as HTTP
 
 **PostgreSQL — metadata only.** One migration (`db/migrations/<ts>_slice7_analytics_catalog.sql`, after `20261006150000_workspace_database_credentials.sql`) creates three tables: `octo.datasets` (workspace, slug, name, created_by; unique on workspace+slug), `octo.dataset_versions` (dataset_id, version, format, `schema jsonb`, `provenance jsonb`, watermark, row_count, `object_keys text[]`, created_by; unique on dataset_id+version), and `octo.analytics_results` (workspace, dataset_version_id, job_id, query_spec, object_key, row_count, content_hash, engine_version; unique on job_id). Each carries RLS plus the Slice 14 RESTRICTIVE tenant fence, is idempotent (`IF NOT EXISTS`), has no top-level transaction control, and **grants DML to `octo_service` only** — mirroring `tests/test_slice21_schema.py`, which asserts `TO octo_service` and forbids `TO authenticated`. No analytical rows, no second catalog.
 
-**R2 — Parquet bytes.** Dataset parts and result artifacts live under the workspace prefix. The server writes them through the existing `ObjectStore` (`objectStore.put`) and reads them with DuckDB. The result download URL is presigned.
+**R2 — Parquet bytes.** Dataset parts and result artifacts live under the workspace prefix. The server writes and reads them through the existing `ObjectStore` (`objectStore.put`/`get`). The result download URL is presigned in production.
 
 **DuckDB — ephemeral, in-process, in the existing worker path.** No new service. The engine is a pinned embedded npm dependency (exact version, no caret) loaded by a new handler in `src/jobs/worker.ts`, dispatched by `processJob` for the reserved `analytics_query` job type and reached through the existing `drainQueueOnce` path in `src/server/index.ts`. Per job: a temp directory (`os.tmpdir()/octo-analytics/<jobId>`), the dataset's object keys from the catalog row, one `read_parquet([...])` over **all** parts, the named spec's SQL, a `COPY (...) TO '<tmp>/result.parquet' (FORMAT PARQUET)`, then `objectStore.put` to `workspaces/<id>/lake/_results/<resultId>.parquet`; the temp directory is removed afterward. The handler sets DuckDB's `max_memory` and a temp-directory limit so the in-process engine cannot grow unbounded, and clamps query timeout/`rowLimit` server-side mirroring `src/server/query.ts`.
 
-**DuckDB reads multiple Parquet objects directly from R2.** The handler configures DuckDB's S3 reader in-process from the same `loadR2ConfigFromEnv()` values the rest of the server uses (`s3_endpoint`, `s3_access_key_id`, `s3_secret_access_key`, `s3_url_style='path'`, `s3_use_ssl=true`) and runs `read_parquet(['s3://<bucket>/<key>', ...])` with the full key list taken from the catalog row. Dataset bytes are fetched over HTTPS, not staged locally or proxied through the API.
+**DuckDB reads the dataset's Parquet parts.** The handler fetches each object through the `ObjectStore` contract (R2 in production, the explicit local backend in CI/dev), stages the bytes into a per-job temp directory, and runs one `read_parquet([...])` over **all** parts. Staging is the one code path both backends share; the bytes still travel server-to-R2 over HTTPS and are never proxied through a caller-facing route. The alternative — DuckDB's own `s3://` reader configured from `loadR2ConfigFromEnv()` — was rejected for this slice because it would make the local-backend gates path a second, divergent implementation. A future performance slice may add the direct reader without changing the product contract.
 
 **Credential boundary.** The R2 access key and secret exist only in the server process environment, are read by `loadR2ConfigFromEnv()`, and are applied as DuckDB session settings inside the server process. They are never returned by a route, written into a job payload, or sent to a browser. The client sees only: (a) at registration, the bytes it already holds going server-side; (b) at result fetch, a short-lived presigned URL. The job payload contains ids only.
 
@@ -225,15 +225,17 @@ Job-level failures (surfaced through the status route's `errorCode`, not as HTTP
 
 ```sql
 SELECT job_type,
-       date_trunc('month', created_at AT TIME ZONE 'UTC') AS month,
+       date_trunc('month', CAST(created_at AS TIMESTAMP)) AS month,
        count(*)::BIGINT AS failure_count
-FROM read_parquet([<server-derived s3 keys from the catalog row>])
+FROM read_parquet([<server-derived staged part paths from the catalog row>])
 WHERE state = 'failed'
 GROUP BY 1, 2
 ORDER BY 1, 2
 ```
 
-Input contract: the dataset must carry `job_type TEXT`, `state TEXT`, `created_at TIMESTAMPTZ` (validated at registration). Result columns are exactly `(job_type, month, failure_count)`; canonical row order is `ORDER BY job_type, month`.
+Every DuckDB instance opens with `SET TimeZone = 'UTC'`, so the month bucket is UTC for a `TIMESTAMP` or a `TIMESTAMPTZ` input and the result's `month` is a timezone-naive timestamp that reads back identically on any host.
+
+Input contract: the dataset must carry `job_type TEXT`, `state TEXT`, `created_at TIMESTAMP` (a `TIMESTAMPTZ` declaration is accepted as the same type family; validated at registration). Result columns are exactly `(job_type, month, failure_count)`; canonical row order is `ORDER BY job_type, month`.
 
 **Production wiring (the anti-dark step).** The wiring is deliberately small, because the engine is embedded: DuckDB is a pinned `package.json` dependency compiled into the existing `octo-api` image (`deploy/gravebuster/Dockerfile.api`). The wiring acceptance item must verify the DuckDB native module **actually loads** in the built image (`node:22-bookworm-slim`) — a native module that fails to load is the embedded-engine analogue of a missing config. The host `.env` must feed the R2 provider the names `loadR2ConfigFromEnv()` reads (`S3_API_ENDPOINT` / `ACCESS_KEY_ID` / `CLOUDFLARE_SECRET_ACCESS_KEY` / `OCTO_R2_BUCKET`, or the `R2_*` fallbacks); `deploy/gravebuster/.env.example` currently sets `CLOUDFLARE_R2_*` names, so the wiring step must confirm the deployed environment feeds the provider and add aliases if it does not — this is **not** assumed to be free. `/health` gains a **new** `analytics: { configured: true, engine: 'duckdb', version }` block (`version` = the pinned DuckDB package version read at startup); note the existing `/health` shape reports only `{ status, version, database, r2: { connected, bucket }, googleAuthEnabled }`, and the graph/embedding dark states are `503` **route** responses, not `/health` fields. **A `503` does not prevent merge-but-dark** — graph (`503 GRAPH_NOT_CONFIGURED`) and retrieval (`503 EMBEDDING_PROVIDER_NOT_CONFIGURED`) shipped dark with exactly that shape. The only real anti-dark mechanism is the named wiring acceptance item plus the deployed production smoke (W1, below). `503 ANALYTICS_NOT_CONFIGURED` is the ordinary runtime error when the object store is absent or the native module failed to load, not the anti-dark guarantee.
 
@@ -241,7 +243,8 @@ Input contract: the dataset must carry `job_type TEXT`, `state TEXT`, `created_a
 
 - **HTTP API** — the four routes above. This is the product boundary.
 - **Frontend** — **no new analytics UI.** The existing operations/jobs surface already lists the `analytics_query` job and its terminal state/result through the existing jobs list. A durable analytics view belongs to slices 4–5.
-- **MCP / SDK / CLI** — **not in this slice.** The thin MCP tool (`register_dataset`, `query_dataset`, `get_analytics_query_status`, `get_analytics_result`) is deferred to Slice 3, consistent with `SLICE_MAP.md` (the MCP adapter is Slice 3) and with issue #13's success condition, which names no MCP tool. This deferral is an owner decision (below).
+- **MCP** — **in this slice, by owner direction (2026-10-19).** Four thin tools — `register_dataset`, `query_dataset`, `get_analytics_query_status`, `get_analytics_result` — forward to the same four HTTP routes through `OctoApi`; they add no policy. This supersedes the earlier deferral to Slice 3: the owner required the capability be "available in agent readable doc and mcp". The MCP tool count and the adopter-facing boot block in `docs/consuming-octo.md` both name them.
+- **SDK / CLI** — not in this slice.
 
 ### Existing code reuse / replacement
 
@@ -293,7 +296,7 @@ Tests exist to prove the accepted claim, not to maximize test count. Add no fail
 - A request body cannot supply an object key outside the version's own derived prefix; every key is derived from the catalog row's identifiers, never accepted from the caller.
 - A dataset version whose recorded schema does not match the Parquet footer, or is missing the spec's required input columns, is rejected at registration with `SCHEMA_MISMATCH`, not accepted and failed later.
 
-**Parquet path conventions — `tests/unit/analytics-paths.test.ts`**
+**Parquet path conventions — `tests/unit/analytics-catalog.test.ts`**
 
 - A dataset version's keys are exactly
   `workspaces/<workspaceId>/lake/<datasetSlug>/v<versionNumber>/dt=<YYYY-MM-DD>/part-<uuid>.parquet`.
@@ -309,7 +312,7 @@ Tests exist to prove the accepted claim, not to maximize test count. Add no fail
 - The enqueued job payload carries only ids (workspace, dataset version, query spec, result id). It contains no R2 credential.
 - `rowLimit`/timeout defaults mirror the SQL surface (`src/server/query.ts`) and are clamped server-side.
 
-**Result registration — `tests/unit/analytics-result.test.ts`**
+**Result registration — `tests/unit/analytics-query.test.ts`**
 
 - A completed job registers exactly one result row: object key, row count, `contentHash` (sha256 hex of the result bytes), query spec, dataset version, job id, and `engineVersion`.
 - A retry under the same idempotency key resolves to the same job and creates no second result row. (Dedupe is anchored on `job_id` via the existing jobs constraint; a *new* idempotency key is a new job and legitimately a new result.)
@@ -372,7 +375,7 @@ The full differential plan is the standalone companion `docs/productization/slic
 | 1 | Parquet vs operational Postgres | DuckDB over fixture-materialized Parquet vs a **test-only** direct Postgres query over `octo.jobs WHERE state='failed'`, filtered to the declared window | In scope (gates, `scripts/verify-analytics.ts`) |
 | 2 | Repartition invariance | Partitioning A vs B of the same logical rows | In scope (unit) |
 | 3 | Engine-version stability | **Determinism/pin check**, not two independent paths: the pinned DuckDB build re-run on a frozen fixture; the resolved version is recorded in result metadata | In scope (unit) |
-| 4 | Client-path equivalence | HTTP vs MCP | **Deferred** — MCP tool is Slice 3; no operations-UI proxy (this slice adds no new UI) |
+| 4 | Client-path equivalence | HTTP vs MCP | In scope (e2e: the same register → query → status → result flow driven through the four MCP tools; unit: each tool forwards to its HTTP route) |
 | 5 | Incremental vs full materialization | Full vs checkpointed fixture producer | In scope as **test-harness only**; no product exporter |
 
 Shared invariants: logical result equality (same columns and ordered rows), not byte equality; canonical order `ORDER BY job_type, month`; UTC month truncation on both sides; every dataset version declares a source window (watermark) and the Postgres oracle compares only rows inside it; the pinned engine version is recorded with every run. **Clamp exemption:** a run truncated by the server-side `rowLimit`/timeout clamp is intended behavior, exempt from the identical-row-sets assertion.
@@ -403,14 +406,16 @@ The holdout asserts the result equals the independently computed aggregate and a
 - `/health` reports `analytics: { configured: true, engine: 'duckdb', version }` after a restart;
 - a designated smoke workspace is provisioned **by the smoke script itself** through the registration route (no manual pre-seeding).
 
-**Smoke script — `scripts/analytics-smoke.ts`** (invoked by the existing `npm run production-smoke` path alongside `src/qa/production-smoke.ts`). Against `OCTO_SMOKE_BASE_URL`:
+**Smoke script — `scripts/analytics-smoke.ts`** (invoked with `OCTO_SMOKE_BASE_URL`; it sits alongside `src/qa/production-smoke.ts` and uses the same base-URL convention). Against a deployed instance:
 
-1. `/health` reports the analytics engine configured;
-2. with an env-provided smoke key, register a small known dataset version via `POST /api/workspaces/:id/datasets`, submit `job-failures-by-type-month@1`, poll the job to completion, fetch the result, and assert the known row count/sum.
+1. `/health` reports the analytics engine configured and an engine version;
+2. the script creates a disposable guest workspace, arms the confirmation gate, and mints its own `read`+`write` workspace key — no manual pre-seeding and no shared key;
+3. it registers a small known dataset version via `POST /api/workspaces/:id/datasets`, submits `job-failures-by-type-month@1`, drains one queue pass, polls the job to completion, downloads the artifact, and asserts the known rows and content hash;
+4. it deletes the disposable workspace, so a smoke run on a live instance leaves no test data behind.
 
 That is the smallest post-deploy check proving the deployed runtime supports the accepted job.
 
-**Evidence-to-close mapping (issue #13):** catalog/version record → `analytics-catalog.test.ts`; multi-file query output → the end-to-end eval; result artifact record → `analytics-result.test.ts`; cross-workspace denial → `analytics.spec.ts`; bulk rows remain out of operational Postgres → the end-to-end eval's row-count assertion; green `gates` → `scripts/verify-analytics.ts` plus the rest of the `gates` job. **W1 (production wiring) is additional evidence this slice adds, because the engine must not ship dark.**
+**Evidence-to-close mapping (issue #13):** catalog/version record → `analytics-catalog.test.ts`; multi-file query output → the end-to-end eval and `scripts/verify-analytics.ts`; result artifact record → `analytics-query.test.ts`; cross-workspace denial → `analytics.spec.ts`; bulk rows remain out of operational Postgres → the end-to-end eval's row-count assertion; green `gates` → `scripts/verify-analytics.ts` plus the rest of the `gates` job. **W1 (production wiring) is additional evidence this slice adds, because the engine must not ship dark.**
 
 ### Done criteria
 
@@ -418,18 +423,19 @@ A slice is done only when: the accepted user job works end to end; the public de
 
 ## Lock
 
-- Owner accepted/corrected: **pending**
-- Locked at: **not locked**
+- Owner accepted/corrected: **2026-10-19.** The owner's direction: *"make it real, write PDD/SDD, hidden holdout, metamorphic validation, make sure it works and is accessible and available for any of my project"*, restated as *"also make sure it's available in agent readable doc and MCP and whatever functions"*. That direction authorizes the holdout and the metamorphic suite (AGENTS.md rule 9), and it supersedes the draft's HTTP-only client-surface default: the MCP tools are in this slice.
+- Locked at: **2026-10-19.**
+- Implementation state: the packet is implemented on `feat/analytics-slice7`; `gates` is the acceptance check on the exact candidate.
 - **Wiring/provisioning acceptance (W1): required in the Lock/Done criteria.** The packet is not done while the analytics engine is merged but dark: the DuckDB dependency must be present and loading in the deployed `octo-api` image, the host environment must feed the R2 provider, `/health` must report the analytics block, and the production smoke must execute the accepted query against R2 and return the known result.
 
-## Decisions for owner review
+## Decisions (resolved at lock)
 
-1. **Analytics-enabled workspaces opt-in?** Issue #13 says "optional capability: analytics-enabled workspaces only." Confirm whether the analytics capability is gated by an explicit workspace flag (and, if so, how it is set) or is available to any workspace holding the required scopes. The packet currently assumes availability is governed only by scopes/membership and adds no workspace flag.
-2. **Engine placement.** The packet's default is **embedded DuckDB in the existing `octo-api` worker drain path** (minimum change, no new service; memory bounded by DuckDB `max_memory` + temp-dir limit + server clamps). The rejected alternative is a separate `octo-analytics` compose service with its own memory cap (the draft TDD's W1). Confirm the embedded default or direct the separate service.
-3. **First accepted question and dataset.** Confirm the first accepted question is **job failures by type and month**, answered over a **caller-registered** dataset with required input columns `(job_type TEXT, state TEXT, created_at TIMESTAMPTZ)` — and confirm the plain statement that this question over Octo's **own** control-plane history is **not** answerable end-to-end by this slice (no exporter).
-4. **First client surface: HTTP-only, or also MCP?** The packet's default is **HTTP-only**; the thin MCP tool is deferred to Slice 3 (consistent with `SLICE_MAP.md` and issue #13). Confirm the default or bring the MCP tool into this slice (which would require defining its contract and an MCP-based eval here).
-5. **Hidden holdout authorization.** AGENTS.md rule 9 permits a holdout only when the owning slice names it. Issue #13 names none. Authorize the single HTTP holdout described above, or remove it.
-6. **Minor catalog additions.** `watermark` (declared export window), `idempotencyKey`, and `rowCount` are additions beyond issue #13's enumerated catalog fields (`workspace, logical dataset/version, schema/format, R2 locations, provenance`). Confirm them or drop them.
-7. **Job-enqueue authority floor.** `analytics.query` lets a `member` with `read` enqueue an `analytics_query` job, whereas the generic `POST /api/jobs` enqueue requires `operator`. Confirm this deliberate lower floor for the single named spec.
-8. **Migration grant target.** The analytics catalog tables grant DML to `octo_service` only (mirroring `tests/test_slice21_schema.py`), not `authenticated`. Confirm.
-9. **Registration ingestion.** Dataset parts are supplied as base64 bytes in the JSON body (the caller never holds R2 credentials and never supplies keys); large-object streaming / presigned direct upload is deferred. Confirm, or direct a streaming/presigned path.
+1. **Analytics-enabled workspaces opt-in?** No workspace flag. Availability is governed by the existing scopes, the key's workspace binding, and membership; `read` may query, `write` may register. (Packet default retained.)
+2. **Engine placement.** Embedded DuckDB in the existing worker drain path; no separate service. Bounded by `max_memory = 512MB`, two threads, a per-job temp/spill directory, and a 30 s interrupt. (Packet default retained.)
+3. **First accepted question and dataset.** Job failures by type and month, over a **caller-registered** dataset carrying `(job_type, state, created_at)`. Octo's own control-plane history is not answerable end-to-end; there is no exporter. (Packet default retained.)
+4. **First client surface.** HTTP **and MCP**, by owner direction (2026-10-19). The four thin tools add no policy; they forward to the same routes and are covered by unit forwarding tests plus an e2e flow through the tools.
+5. **Hidden holdout.** Authorized by the owner (2026-10-19). One HTTP holdout with unseen labels, a different partition layout, and a year-crossing range; it also asserts the public fixture's numbers do not appear.
+6. **Minor catalog additions.** `watermark`, `idempotencyKey`, and `rowCount` are retained: the watermark scopes the differential oracle, the idempotency key makes a repeated export converge, and the row count is footer-derived evidence.
+7. **Job-enqueue authority floor.** Confirmed: `analytics.query` requires `member` + `read` and enqueues only the one named read-only spec. It does not open the generic `POST /api/jobs` surface.
+8. **Migration grant target.** Confirmed: DML is granted to `octo_service` only; the request path never writes the catalog directly and `octo_app` is RLS-fenced.
+9. **Registration ingestion.** Confirmed: parts arrive as base64 in one JSON body, with no caller-supplied keys and no R2 credential. Streaming/presigned upload remains deferred.

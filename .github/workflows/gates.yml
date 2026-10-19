@@ -177,6 +177,19 @@ jobs:
           OCTO_ADMIN_URL: postgresql://postgres:postgres@localhost:54329/postgres
         run: npx tsx scripts/verify-workspace-query.ts
 
+      - name: Verify analytics lake (Slice 7)
+        # Proves the accepted analytics job end to end against a real PostgreSQL
+        # catalog and the pinned DuckDB build: registration inspects the Parquet
+        # footers and assigns a version, the named query runs as a job, DuckDB's
+        # answer equals PostgreSQL's over the same rows, a rerun reproduces the
+        # rows, and another workspace cannot see the version. Object bytes use the
+        # local backend, which is the same ObjectStore contract production serves
+        # over R2.
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:54329/postgres
+          OCTO_SERVICE_URL: postgresql://octo_service:octo_service@localhost:54329/postgres
+        run: npx tsx scripts/verify-analytics.ts
+
       - name: Playwright E2E and Multimodal Vision QA
         env:
           INFERHUB_API_KEY: ${{ secrets.INFERHUB_API_KEY }}

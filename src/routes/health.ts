@@ -5,6 +5,7 @@
  * family handled the request.
  */
 
+import { analyticsEngineStatus } from '../analytics/engine';
 import { testDbConnection } from '../server/db';
 import { getGoogleClientCredentials, getTurnstileSiteKey } from '../server/google-auth';
 import { sendJson } from '../server/http';
@@ -30,6 +31,7 @@ export async function handleHealthRoutes(
       r2: r2Status,
       googleAuthEnabled: Boolean(clientId),
       turnstileSiteKey: getTurnstileSiteKey(),
+      analytics: await analyticsEngineStatus(),
     });
     return true;
   }

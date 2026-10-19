@@ -36,6 +36,7 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
         "A workspace's durable data lives in Octo: do not stand up a separate database for a project Octo serves. Provision the workspace database through Octo and reach it with query_workspace_database, or with its own connection string.",
         'A workspace-scoped key (octo_live_ws_) reaches only its own workspace and cannot create workspaces or mint keys — both are human-stamped. An account-wide key (octo_live_acc_) manages every workspace the principal belongs to.',
         'The epistemic ledger is append-only and bitemporal: record_epistemic writes; query_claims_as_of and query_belief_as_of read as of a recorded-time and/or valid-time instant.',
+        'Historical analytics is register_dataset (immutable Parquet versions) then query_dataset (a named spec, never SQL), polled with get_analytics_query_status and downloaded with get_analytics_result.',
         "Octo's repository is read-only to adopters: propose a change as an OIO observational issue, never a pull request.",
       ].join(' '),
     }
@@ -465,6 +466,100 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
     async ({ workspaceId, jobId }) => {
       try {
         return asText(await api.retryJob({ workspaceId, jobId }));
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'register_dataset',
+    'Register an immutable Parquet dataset version for historical analytics. Supply base64-encoded Parquet parts, the declared column schema, and provenance; the server inspects every footer, rejects a mismatch, assigns the next version, and derives the object keys itself. A re-export is a new version, never a mutation. The schema must carry the query spec inputs (job-failures-by-type-month@1: job_type TEXT, state TEXT, created_at TIMESTAMP). Requires the write scope.',
+    {
+      workspaceId: z.string().describe('The workspace that owns the dataset'),
+      dataset: z.string().describe('Lowercase dataset slug ([a-z0-9-]), stable across versions'),
+      name: z.string().optional().describe('Human-readable dataset name'),
+      schema: z
+        .array(z.object({ name: z.string(), type: z.string() }))
+        .describe('Declared columns in file order, e.g. [{name:"job_type",type:"TEXT"}]'),
+      provenance: z
+        .record(z.string(), z.unknown())
+        .describe('Where the export came from: at least { source, exportedAt }'),
+      watermark: z.string().optional().describe('Newest source instant included in the export'),
+      idempotencyKey: z.string().optional().describe('Retry key; a repeat returns the same version'),
+      parts: z
+        .array(z.object({ partition: z.string(), dataBase64: z.string() }))
+        .describe('Parquet parts: partition is a YYYY-MM-DD date, dataBase64 is the file bytes'),
+    },
+    async ({ workspaceId, dataset, name, schema, provenance, watermark, idempotencyKey, parts }) => {
+      try {
+        return asText(
+          await api.registerDataset({
+            workspaceId,
+            dataset,
+            name,
+            schema,
+            provenance,
+            watermark,
+            idempotencyKey,
+            parts,
+          })
+        );
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'query_dataset',
+    'Submit one named analytical query over a registered dataset version and return the enqueued job. The caller names a query spec, never SQL; the server builds the statement and runs it in the background. Available spec: job-failures-by-type-month@1 (failed jobs grouped by job_type and UTC month). Poll with get_analytics_query_status. Requires the read scope.',
+    {
+      workspaceId: z.string().describe('The workspace that owns the dataset'),
+      datasetVersionId: z.string().describe('The dataset version id returned by register_dataset'),
+      querySpec: z.string().describe('Named query spec, e.g. job-failures-by-type-month@1'),
+      idempotencyKey: z
+        .string()
+        .optional()
+        .describe('Retry key; defaults to analytics:<datasetVersionId>:<querySpec>'),
+    },
+    async ({ workspaceId, datasetVersionId, querySpec, idempotencyKey }) => {
+      try {
+        return asText(
+          await api.submitAnalyticsQuery({ workspaceId, datasetVersionId, querySpec, idempotencyKey })
+        );
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'get_analytics_query_status',
+    'Read one analytics job: its state (queued, running, completed, failed), error code and summary on failure, and -- once completed -- the result id and artifact metadata. Requires the read scope.',
+    {
+      workspaceId: z.string().describe('The workspace that owns the job'),
+      jobId: z.string().describe('The job id returned by query_dataset'),
+    },
+    async ({ workspaceId, jobId }) => {
+      try {
+        return asText(await api.getAnalyticsQueryStatus({ workspaceId, jobId }));
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'get_analytics_result',
+    'Fetch a completed analytics result: its metadata plus a short-lived download URL for the derived Parquet artifact (the content route on a local backend). Requires the read scope.',
+    {
+      workspaceId: z.string().describe('The workspace that owns the result'),
+      resultId: z.string().describe('The result id from get_analytics_query_status'),
+    },
+    async ({ workspaceId, resultId }) => {
+      try {
+        return asText(await api.getAnalyticsResult({ workspaceId, resultId }));
       } catch (error) {
         return asError(error);
       }
