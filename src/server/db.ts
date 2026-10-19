@@ -3200,6 +3200,11 @@ export async function dbInsertVaultLeaseService(input: {
   prefix: string;
   name: string;
   expiresAt: string;
+  baseUrl: string | null;
+  authScheme: string;
+  authHeader: string | null;
+  bodyField: string | null;
+  basicUsername: string | null;
 }): Promise<void> {
   await withTransaction(async (client) => {
     await client.query(
@@ -3210,8 +3215,9 @@ export async function dbInsertVaultLeaseService(input: {
     );
     await client.query(
       `INSERT INTO octo.vault_leases (
-         id, principal_id, item_id, parent_grant_id, key_hash, prefix, name, expires_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+         id, principal_id, item_id, parent_grant_id, key_hash, prefix, name, expires_at,
+         base_url, auth_scheme, auth_header, body_field, basic_username
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         input.id,
         input.principalId,
@@ -3221,6 +3227,11 @@ export async function dbInsertVaultLeaseService(input: {
         input.prefix,
         input.name,
         input.expiresAt,
+        input.baseUrl,
+        input.authScheme,
+        input.authHeader,
+        input.bodyField,
+        input.basicUsername,
       ]
     );
   }, servicePool);
@@ -3290,6 +3301,40 @@ export async function dbConsumeVaultLease(keyHash: string, routeKey: string): Pr
             expires_at AS "expiresAt"
      FROM octo.consume_vault_lease($1, $2)`,
     [keyHash, routeKey]
+  );
+  return rows[0] ?? null;
+}
+
+export interface ConsumedVaultLeaseAny {
+  leaseId: string;
+  principalId: string;
+  itemId: string;
+  baseUrl: string | null;
+  authScheme: string;
+  authHeader: string | null;
+  bodyField: string | null;
+  basicUsername: string | null;
+  itemUsername: string | null;
+  secretEncrypted: string | null;
+  expiresAt: string;
+}
+
+/** Resolves a working key for the free-form proxy, with no route required. */
+export async function dbConsumeVaultLeaseByKey(keyHash: string): Promise<ConsumedVaultLeaseAny | null> {
+  const rows = await queryService<ConsumedVaultLeaseAny>(
+    `SELECT lease_id AS "leaseId",
+            principal_id AS "principalId",
+            item_id AS "itemId",
+            base_url AS "baseUrl",
+            auth_scheme AS "authScheme",
+            auth_header AS "authHeader",
+            body_field AS "bodyField",
+            basic_username AS "basicUsername",
+            item_username AS "itemUsername",
+            secret_encrypted AS "secretEncrypted",
+            expires_at AS "expiresAt"
+     FROM octo.consume_vault_lease_by_key($1)`,
+    [keyHash]
   );
   return rows[0] ?? null;
 }

@@ -308,70 +308,89 @@ curl -s -X POST https://octo.example/api/vault/open/lease \
   -d '{"label": "Fish Audio", "expiresInDays": 15}'
 ```
 
-`label` must match a stored item in the grant's cabinet; `itemId` works too. Octo
-needs a vendor base URL before it can relay the key. It uses, in order: an explicit
-route on the item, a `baseUrl` passed at lease time, or the item's own `url` (turned
-into a bearer route the first time it is minted). An imported token with no url of
-its own therefore works when the caller names the vendor:
+`label` must match a stored item in the grant's cabinet; `itemId` works too.
+`expiresInDays` defaults to 15 and accepts 1–30. Asking again for the same item
+rotates the previous working key out.
+
+A working key is **free-form**: it is not pinned to one base URL. The lease stores
+only *how* to inject the secret. That recipe comes from, in order, a `baseUrl` and
+scheme you pass at lease time, an existing dashboard route on the item, or the
+item's own `url` with a bearer header. An item with none of those still mints — you
+just name the target on every request.
 
 ```bash
 curl -s -X POST https://octo.example/api/vault/open/lease \
   -H "Authorization: Bearer $OCTO_VAULT_GRANT" \
   -H 'Content-Type: application/json' \
-  -d '{"itemId": "…", "baseUrl": "https://api.vendor.example/v1", "authScheme": "bearer"}'
+  -d '{"itemId": "…", "baseUrl": "https://api.vendor.example/v1", "authScheme": "x-api-key", "authHeader": "X-Api-Key"}'
 ```
 
 `authScheme` defaults to `bearer`; `x-api-key` and `query` also need `authHeader`,
-`basic` can take `basicUsername`, and `body_json` and `path` need `bodyField`. The
-derived route is saved on the item, so the owner sees it in the dashboard and later
-leases reuse it. An item with no route, no `baseUrl`, and no `url` answers
-`400 ROUTE_REQUIRED` with `code`, `itemId`, and `requires: "baseUrl"` so a caller can
-tell the missing prerequisite apart from a bad label or an expired grant.
+`basic` can take `basicUsername`, and `body_json` and `path` need `bodyField`.
 
-The response carries the working key and the relay route(s) for that item:
+The response carries the working key and the proxy entry point:
 
 ```json
 {
   "lease": { "id": "…", "itemLabel": "Fish Audio", "prefix": "octo_tmp_…", "expiresAt": "…" },
   "rawSecret": "octo_tmp_…",
-  "routes": [
-    { "routeKey": "fish-audio-1a2b3c", "authScheme": "bearer",
-      "url": "https://octo.example/api/vault/relay/fish-audio-1a2b3c" }
-  ]
+  "proxy": {
+    "url": "https://octo.example/api/vault/proxy",
+    "targetHeader": "x-octo-target",
+    "defaultTarget": "https://api.vendor.example/v1"
+  },
+  "routes": []
 }
 ```
 
-The raw key is shown once. `expiresInDays` defaults to 15 and accepts 1–30. Asking
-again for the same item rotates the previous working key out.
+The raw key is shown once. `routes` lists any dashboard routes the item already
+had; a lease no longer needs one.
 
-### 2. Use it as if it were the vendor key
+### 2. Send it wherever the vendor is
 
-Point the program's base URL at the route's `url` and put the working key where the
-vendor expects its credential:
+Name the full upstream URL in `x-octo-target` (or `?target=`, or as the path after
+`/api/vault/proxy`). Any `http(s)` URL works, independent of the item's url:
 
 ```bash
-curl -s https://octo.example/api/vault/relay/fish-audio-1a2b3c/v1/tts \
+curl -s https://octo.example/api/vault/proxy \
+  -H "Authorization: Bearer octo_tmp_…" \
+  -H "x-octo-target: https://api.vendor.example/v1/tts" \
+  -d '{"text": "hello"}'
+```
+
+The path form is convenient when a client only lets you set a base URL:
+
+```bash
+curl -s "https://octo.example/api/vault/proxy/https://api.vendor.example/v1/tts" \
   -H "Authorization: Bearer octo_tmp_…"
 ```
 
-The relay resolves the working key, injects the stored secret using the route's auth
+A relative path resolves against `defaultTarget`, so `/api/vault/proxy/v1/tts`
+reaches `https://api.vendor.example/v1/tts`. With no target and no
+`defaultTarget`, the proxy answers `400 TARGET_REQUIRED`.
+
+The proxy resolves the working key, injects the stored secret using the lease's auth
 scheme, forwards the request, and streams the vendor's response back. The working key
 is stripped from every position the scheme does not use, so it never reaches the
-vendor. The path suffix and query are forwarded unchanged.
+vendor. The path and query are forwarded unchanged.
 
-The relay accepts the working key in any of the usual positions — `Authorization:
+The proxy accepts the working key in any of the usual positions — `Authorization:
 Bearer`, `Basic` (either half), `x-api-key`, the path, or a query parameter — and
 refuses two *different* keys in two positions. The scheme decides how the stored secret
 is injected upstream:
 
-| Route scheme | Put the working key where the vendor expects it |
+| Auth scheme | Put the working key where the vendor expects it |
 | --- | --- |
 | `bearer` | `Authorization: Bearer octo_tmp_…` |
-| `x-api-key` | the route's header, e.g. `x-api-key: octo_tmp_…` |
+| `x-api-key` | the configured header, e.g. `x-api-key: octo_tmp_…` |
 | `basic` | `Authorization: Basic base64(user:octo_tmp_…)` |
-| `query` | the route's query parameter |
-| `body_json` | the route's JSON body field, e.g. `{"api_key": "octo_tmp_…"}` |
+| `query` | the configured query parameter |
+| `body_json` | the configured JSON body field, e.g. `{"api_key": "octo_tmp_…"}` |
 | `path` | in the path where the vendor puts the token, e.g. Telegram `/bot<octo_tmp_…>/getMe` |
+
+A dashboard route keeps working through its pinned relay URL,
+`ANY /api/vault/relay/<routeKey>/…`, which forwards the caller's path below the
+route's base URL. Use the proxy when the agent needs to choose the upstream.
 
 ### 3. Renew, inspect, revoke
 
@@ -393,8 +412,8 @@ answers `401`.
 
 It is not a session, a grant, or an API key. It cannot open the cabinet, list vault
 items, list grants, create workspaces, or call any path outside
-`/api/vault/relay/<routeKey>`, `/api/vault/lease/renew`, and `/api/vault/lease/info`.
-Every other Octo path answers `401`.
+`/api/vault/proxy`, `/api/vault/relay/<routeKey>`, `/api/vault/lease/renew`, and
+`/api/vault/lease/info`. Every other Octo path answers `401`.
 
 That fence is the point: a working key is the only vault token an agent should hold.
 
@@ -410,7 +429,8 @@ API, under `/api/vault/`. If a token returns `401` on `/api/files`, `/api/shares
 | `POST /api/vault/open/lease` | grant | Mint a working key for one item. |
 | `POST /api/vault/lease/renew` | working key | Extend a working key. |
 | `GET /api/vault/lease/info` | working key | Describe a working key. |
-| `ANY /api/vault/relay/<routeKey>/…` | working key | Call the vendor through Octo. |
+| `ANY /api/vault/proxy[/<target>]` | working key | Call any vendor URL through Octo. |
+| `ANY /api/vault/relay/<routeKey>/…` | working key | Call a dashboard route's vendor through Octo. |
 | `GET /api/vault/grants`, `DELETE /api/vault/grants/<id>` | session | Owner lists and revokes grants. |
 | `GET /api/vault/leases`, `DELETE /api/vault/leases/<id>` | session | Owner lists and revokes working keys. |
 
@@ -429,7 +449,7 @@ SQL surface, and an API key does **not** authenticate `/api/vault/open`.
   `GET /api/workspaces/<id>/analytics/results/<resultId>`
 - Vault: `GET /api/vault/open`, `POST /api/vault/open/lease`,
   `POST /api/vault/lease/renew`, `GET /api/vault/lease/info`,
-  `ANY /api/vault/relay/<routeKey>/…`
+  `ANY /api/vault/proxy[/<target>]`, `ANY /api/vault/relay/<routeKey>/…`
 - MCP tools `create_workspace`, `query_workspace_database`, `provision_database`,
   `register_dataset`, `query_dataset`, `get_analytics_query_status`,
   `get_analytics_result`
@@ -490,8 +510,9 @@ it. `octo_live_…` is an API key: it cannot open the vault. `octo_vault_…` is
 and `hasSecret` — the inventory, never a stored value. `octo_tmp_…` is a **working
 key**: one stored item, relay-only, never reveals the vendor secret. To use a vendor
 key, list the cabinet with the grant, mint a working key for the item you need
-(`POST /api/vault/open/lease`), then call `/api/vault/relay/<routeKey>` with it. An
-item with no route and no url answers `ROUTE_REQUIRED` — ask the human to add one.
+(`POST /api/vault/open/lease`), then send requests to `/api/vault/proxy` with the
+working key and the vendor URL in `x-octo-target`. The key is not pinned to a base
+URL; any `http(s)` target works.
 The vault lives under `/api/vault/` on the same Octo host — there is no separate
 vault subdomain, and `401` on `/api/workspaces` or `/api/files` with a vault token is
 expected, not a sign the vault is missing.
