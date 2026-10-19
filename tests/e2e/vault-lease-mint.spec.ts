@@ -133,7 +133,9 @@ test.describe('vault working keys', () => {
     expect(decoyLease.status()).toBe(403);
   });
 
-  test('an item with no url and no route cannot mint a key, and a url alone is enough', async ({ request }) => {
+  test('a route-less item needs a baseUrl at lease time, and that baseUrl becomes its route', async ({
+    request,
+  }) => {
     const session = await createGuest(request);
 
     const bare = await request.post('/api/vault/items', {
@@ -174,13 +176,64 @@ test.describe('vault working keys', () => {
       data: { itemId: bareId },
     });
     expect(refused.status()).toBe(400);
-    expect(((await refused.json()) as { error: string }).error).toContain('ROUTE_REQUIRED');
+    const refusedBody = (await refused.json()) as {
+      error: string;
+      code: string;
+      itemId: string;
+      requires: string;
+    };
+    expect(refusedBody.code).toBe('ROUTE_REQUIRED');
+    expect(refusedBody.itemId).toBe(bareId);
+    expect(refusedBody.requires).toBe('baseUrl');
+    expect(refusedBody.error).toContain('ROUTE_REQUIRED');
+
+    // A grant cannot reach the owner-only item and route endpoints.
+    const ownerOnly = await request.get(`/api/vault/items/${bareId}`, { headers: bearer(grantSecret) });
+    expect(ownerOnly.status()).toBe(403);
 
     // No route was created for the item that could not use one.
     const bareRoutes = await request.get(`/api/vault/items/${bareId}/routes`, {
       headers: bearer(session.sessionToken),
     });
     expect(((await bareRoutes.json()) as { routes: unknown[] }).routes).toHaveLength(0);
+
+    // Naming the vendor base URL at lease time makes the imported token usable.
+    const leased = await request.post('/api/vault/open/lease', {
+      headers: bearer(grantSecret),
+      data: {
+        itemId: bareId,
+        expiresInDays: 1,
+        baseUrl: 'https://api.vendor.test/v1',
+        authScheme: 'x-api-key',
+        authHeader: 'X-Api-Key',
+      },
+    });
+    expect(leased.status()).toBe(201);
+    const leasedBody = (await leased.json()) as { routes: Array<{ routeKey: string; baseUrl: string }> };
+    expect(leasedBody.routes).toHaveLength(1);
+    expect(leasedBody.routes[0]?.baseUrl).toBe('https://api.vendor.test/v1');
+    expect(leasedBody.routes[0]?.routeKey).toContain('-auto');
+
+    // The derived route is persisted for the owner, with the scheme it was
+    // leased under.
+    const persisted = await request.get(`/api/vault/items/${bareId}/routes`, {
+      headers: bearer(session.sessionToken),
+    });
+    const persistedRoutes = (
+      (await persisted.json()) as { routes: Array<{ routeKey: string; authScheme: string; authHeader: string }> }
+    ).routes;
+    expect(persistedRoutes).toHaveLength(1);
+    expect(persistedRoutes[0]?.routeKey).toBe(leasedBody.routes[0]?.routeKey);
+    expect(persistedRoutes[0]?.authScheme).toBe('x-api-key');
+    expect(persistedRoutes[0]?.authHeader).toBe('X-Api-Key');
+
+    // A later lease with no baseUrl reuses the route instead of adding another.
+    const second = await request.post('/api/vault/open/lease', {
+      headers: bearer(grantSecret),
+      data: { itemId: bareId },
+    });
+    expect(second.status()).toBe(201);
+    expect(((await second.json()) as { routes: unknown[] }).routes).toHaveLength(1);
 
     const derived = await request.post('/api/vault/open/lease', {
       headers: bearer(grantSecret),
@@ -193,11 +246,11 @@ test.describe('vault working keys', () => {
     expect(derivedBody.routes[0]?.routeKey).toContain('-auto');
 
     // Minting again reuses the derived route instead of adding a second one.
-    const second = await request.post('/api/vault/open/lease', {
+    const secondDerived = await request.post('/api/vault/open/lease', {
       headers: bearer(grantSecret),
       data: { itemId: urlId },
     });
-    expect(second.status()).toBe(201);
-    expect(((await second.json()) as { routes: unknown[] }).routes).toHaveLength(1);
+    expect(secondDerived.status()).toBe(201);
+    expect(((await secondDerived.json()) as { routes: unknown[] }).routes).toHaveLength(1);
   });
 });

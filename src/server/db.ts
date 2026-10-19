@@ -3054,13 +3054,29 @@ export async function dbInsertVaultRouteService(input: {
   routeKey: string;
   name: string;
   baseUrl: string;
+  authScheme?: string;
+  authHeader?: string | null;
+  bodyField?: string | null;
+  basicUsername?: string | null;
 }): Promise<void> {
   await queryService(
     `INSERT INTO octo.vault_routes (
-       id, principal_id, item_id, route_key, name, base_url, auth_scheme
-     ) VALUES ($1, $2, $3, $4, $5, $6, 'bearer')
+       id, principal_id, item_id, route_key, name, base_url,
+       auth_scheme, auth_header, body_field, basic_username
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT (route_key) DO NOTHING`,
-    [input.id, input.principalId, input.itemId, input.routeKey, input.name, input.baseUrl]
+    [
+      input.id,
+      input.principalId,
+      input.itemId,
+      input.routeKey,
+      input.name,
+      input.baseUrl,
+      input.authScheme ?? 'bearer',
+      input.authHeader ?? null,
+      input.bodyField ?? null,
+      input.basicUsername ?? null,
+    ]
   );
 }
 
