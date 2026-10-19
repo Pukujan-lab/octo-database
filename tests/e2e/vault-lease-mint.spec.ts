@@ -133,9 +133,7 @@ test.describe('vault working keys', () => {
     expect(decoyLease.status()).toBe(403);
   });
 
-  test('a route-less item needs a baseUrl at lease time, and that baseUrl becomes its route', async ({
-    request,
-  }) => {
+  test('a working key is a free-form credential: no route is required or invented', async ({ request }) => {
     const session = await createGuest(request);
 
     const bare = await request.post('/api/vault/items', {
@@ -171,33 +169,32 @@ test.describe('vault working keys', () => {
     });
     const grantSecret = ((await minted.json()) as { rawSecret: string }).rawSecret;
 
-    const refused = await request.post('/api/vault/open/lease', {
+    // A bare token mints immediately: the caller names the upstream per request.
+    const bareLease = await request.post('/api/vault/open/lease', {
       headers: bearer(grantSecret),
       data: { itemId: bareId },
     });
-    expect(refused.status()).toBe(400);
-    const refusedBody = (await refused.json()) as {
-      error: string;
-      code: string;
-      itemId: string;
-      requires: string;
+    expect(bareLease.status()).toBe(201);
+    const bareBody = (await bareLease.json()) as {
+      proxy: { url: string; targetHeader: string; defaultTarget: string | null };
+      routes: unknown[];
     };
-    expect(refusedBody.code).toBe('ROUTE_REQUIRED');
-    expect(refusedBody.itemId).toBe(bareId);
-    expect(refusedBody.requires).toBe('baseUrl');
-    expect(refusedBody.error).toContain('ROUTE_REQUIRED');
+    expect(bareBody.proxy.url).toContain('/api/vault/proxy');
+    expect(bareBody.proxy.targetHeader).toBe('x-octo-target');
+    expect(bareBody.proxy.defaultTarget).toBeNull();
+    expect(bareBody.routes).toHaveLength(0);
 
     // A grant cannot reach the owner-only item and route endpoints.
     const ownerOnly = await request.get(`/api/vault/items/${bareId}`, { headers: bearer(grantSecret) });
     expect(ownerOnly.status()).toBe(403);
 
-    // No route was created for the item that could not use one.
+    // No route was invented behind the owner's back.
     const bareRoutes = await request.get(`/api/vault/items/${bareId}/routes`, {
       headers: bearer(session.sessionToken),
     });
     expect(((await bareRoutes.json()) as { routes: unknown[] }).routes).toHaveLength(0);
 
-    // Naming the vendor base URL at lease time makes the imported token usable.
+    // A lease-time recipe is stored on the lease itself, not turned into a route.
     const leased = await request.post('/api/vault/open/lease', {
       headers: bearer(grantSecret),
       data: {
@@ -209,48 +206,29 @@ test.describe('vault working keys', () => {
       },
     });
     expect(leased.status()).toBe(201);
-    const leasedBody = (await leased.json()) as { routes: Array<{ routeKey: string; baseUrl: string }> };
-    expect(leasedBody.routes).toHaveLength(1);
-    expect(leasedBody.routes[0]?.baseUrl).toBe('https://api.vendor.test/v1');
-    expect(leasedBody.routes[0]?.routeKey).toContain('-auto');
+    const leasedBody = (await leased.json()) as {
+      proxy: { defaultTarget: string | null };
+      routes: unknown[];
+    };
+    expect(leasedBody.proxy.defaultTarget).toBe('https://api.vendor.test/v1');
+    expect(leasedBody.routes).toHaveLength(0);
 
-    // The derived route is persisted for the owner, with the scheme it was
-    // leased under.
     const persisted = await request.get(`/api/vault/items/${bareId}/routes`, {
       headers: bearer(session.sessionToken),
     });
-    const persistedRoutes = (
-      (await persisted.json()) as { routes: Array<{ routeKey: string; authScheme: string; authHeader: string }> }
-    ).routes;
-    expect(persistedRoutes).toHaveLength(1);
-    expect(persistedRoutes[0]?.routeKey).toBe(leasedBody.routes[0]?.routeKey);
-    expect(persistedRoutes[0]?.authScheme).toBe('x-api-key');
-    expect(persistedRoutes[0]?.authHeader).toBe('X-Api-Key');
+    expect(((await persisted.json()) as { routes: unknown[] }).routes).toHaveLength(0);
 
-    // A later lease with no baseUrl reuses the route instead of adding another.
-    const second = await request.post('/api/vault/open/lease', {
-      headers: bearer(grantSecret),
-      data: { itemId: bareId },
-    });
-    expect(second.status()).toBe(201);
-    expect(((await second.json()) as { routes: unknown[] }).routes).toHaveLength(1);
-
+    // An item's own url becomes the default target, not a persisted route.
     const derived = await request.post('/api/vault/open/lease', {
       headers: bearer(grantSecret),
       data: { itemId: urlId },
     });
     expect(derived.status()).toBe(201);
-    const derivedBody = (await derived.json()) as { routes: Array<{ routeKey: string; baseUrl: string }> };
-    expect(derivedBody.routes).toHaveLength(1);
-    expect(derivedBody.routes[0]?.baseUrl).toBe('https://api.inferhub.dev/v1');
-    expect(derivedBody.routes[0]?.routeKey).toContain('-auto');
-
-    // Minting again reuses the derived route instead of adding a second one.
-    const secondDerived = await request.post('/api/vault/open/lease', {
-      headers: bearer(grantSecret),
-      data: { itemId: urlId },
-    });
-    expect(secondDerived.status()).toBe(201);
-    expect(((await secondDerived.json()) as { routes: unknown[] }).routes).toHaveLength(1);
+    const derivedBody = (await derived.json()) as {
+      proxy: { defaultTarget: string | null };
+      routes: unknown[];
+    };
+    expect(derivedBody.proxy.defaultTarget).toBe('https://api.inferhub.dev/v1');
+    expect(derivedBody.routes).toHaveLength(0);
   });
 });
