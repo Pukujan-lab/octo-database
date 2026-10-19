@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { IncomingMessage } from 'node:http';
 import {
+  buildProxyRequest,
   buildUpstreamRequest,
   classifyUpstream,
   extractTempKey,
@@ -184,6 +185,73 @@ describe('buildUpstreamRequest', () => {
     expect('error' in build({ route: { authScheme: 'query', authHeader: null } })).toBe(true);
     expect('error' in build({ route: { authScheme: 'body_json', bodyField: null } })).toBe(true);
     expect('error' in build({ route: { authScheme: 'path', bodyField: null } })).toBe(true);
+  });
+});
+
+describe('buildProxyRequest', () => {
+  function proxy(overrides: {
+    route?: Partial<RelayRoute>;
+    targetUrl?: string;
+    headers?: Record<string, string>;
+    body?: Buffer | null;
+    tempKey?: string;
+  }) {
+    return buildProxyRequest({
+      targetUrl: overrides.targetUrl ?? 'https://api.other.test/v2/things?limit=5',
+      route: route(overrides.route),
+      secret: 'real-secret',
+      tempKey: overrides.tempKey ?? KEY,
+      headers: overrides.headers ?? {},
+      body: overrides.body ?? null,
+    });
+  }
+
+  it('uses the caller target, not the route base url', () => {
+    const built = proxy({ headers: { authorization: `Bearer ${KEY}` } });
+    if ('error' in built) throw new Error(built.error);
+    expect(built.url).toBe('https://api.other.test/v2/things?limit=5');
+    expect(built.headers['Authorization']).toBe('Bearer real-secret');
+  });
+
+  it('drops the target header so the vendor never sees it', () => {
+    const built = proxy({ headers: { 'x-octo-target': 'https://api.other.test/v2/things' } });
+    if ('error' in built) throw new Error(built.error);
+    expect(built.headers['x-octo-target']).toBeUndefined();
+  });
+
+  it('substitutes a working key carried in the target path', () => {
+    const built = proxy({
+      route: { authScheme: 'path', bodyField: 'bot{key}', baseUrl: 'https://api.telegram.org' },
+      targetUrl: `https://api.telegram.org/bot${KEY}/getMe`,
+    });
+    if ('error' in built) throw new Error(built.error);
+    expect(built.url).toBe('https://api.telegram.org/botreal-secret/getMe');
+  });
+
+  it('fills a {key} placeholder in the caller target', () => {
+    const built = proxy({
+      route: { authScheme: 'path', bodyField: 'bot{key}', baseUrl: 'https://api.telegram.org' },
+      targetUrl: 'https://api.telegram.org/bot{key}/getMe',
+    });
+    if ('error' in built) throw new Error(built.error);
+    expect(built.url).toBe('https://api.telegram.org/botreal-secret/getMe');
+  });
+
+  it('strips a working key from the target query and injects the real secret', () => {
+    const built = proxy({
+      route: { authScheme: 'query', authHeader: 'api_key' },
+      targetUrl: `https://api.other.test/v2/things?key=${KEY}&limit=5`,
+    });
+    if ('error' in built) throw new Error(built.error);
+    const url = new URL(built.url);
+    expect(url.searchParams.get('api_key')).toBe('real-secret');
+    expect(url.searchParams.get('limit')).toBe('5');
+    expect(built.url).not.toContain(KEY);
+  });
+
+  it('refuses a target that is not an absolute http(s) url', () => {
+    expect('error' in proxy({ targetUrl: 'not-a-url' })).toBe(true);
+    expect('error' in proxy({ targetUrl: 'ftp://api.other.test/x' })).toBe(true);
   });
 });
 

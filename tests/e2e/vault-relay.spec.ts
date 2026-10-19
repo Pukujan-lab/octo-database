@@ -120,4 +120,70 @@ test.describe('vault relay', () => {
     });
     expect(afterRevoke.status()).toBe(401);
   });
+
+  test('the free-form proxy sends a working key to any caller-named target', async ({ request }) => {
+    const session = await createGuest(request);
+    const auth = bearer(session.sessionToken);
+
+    // The item points at a vendor that does not exist. The proxy must ignore
+    // it and reach whatever target the caller names.
+    const stored = await request.post('/api/vault/items', {
+      headers: auth,
+      data: {
+        label: 'Free proxy',
+        description: 'A token whose stored url must not pin the working key.',
+        kind: 'token',
+        url: 'https://api.example.invalid/v1',
+        secret: `proxy-${randomUUID()}`,
+        confirmSecret: CONFIRM_SECRET,
+      },
+    });
+    expect(stored.status()).toBe(201);
+    const itemId = ((await stored.json()) as { item: { id: string } }).item.id;
+
+    const minted = await request.post('/api/vault/grants', {
+      headers: auth,
+      data: { name: 'proxy agent', expiresInHours: 10, confirmSecret: CONFIRM_SECRET },
+    });
+    expect(minted.status()).toBe(201);
+    const grantSecret = ((await minted.json()) as { rawSecret: string }).rawSecret;
+
+    const lease = await request.post('/api/vault/open/lease', {
+      headers: bearer(grantSecret),
+      data: { itemId, expiresInDays: 1 },
+    });
+    expect(lease.status()).toBe(201);
+    const leaseBody = (await lease.json()) as { lease: { id: string }; rawSecret: string };
+    const workingKey = leaseBody.rawSecret;
+
+    // Absolute target in the header.
+    const proxied = await request.get('/api/vault/proxy', {
+      headers: { ...bearer(workingKey), 'x-octo-target': `${UPSTREAM_ORIGIN}/health` },
+    });
+    expect(proxied.status()).toBe(200);
+    expect(((await proxied.json()) as { status: string }).status).toBe('ok');
+
+    // The same target as a path suffix.
+    const viaPath = await request.get(`/api/vault/proxy/${UPSTREAM_ORIGIN}/health`, {
+      headers: bearer(workingKey),
+    });
+    expect(viaPath.status()).toBe(200);
+
+    // The working key is the credential: without it nothing egresses.
+    const noKey = await request.get('/api/vault/proxy', {
+      headers: { 'x-octo-target': `${UPSTREAM_ORIGIN}/health` },
+    });
+    expect(noKey.status()).toBe(401);
+
+    const revoked = await request.delete(`/api/vault/leases/${leaseBody.lease.id}`, {
+      headers: auth,
+      data: { confirmSecret: CONFIRM_SECRET },
+    });
+    expect(revoked.status()).toBe(200);
+
+    const afterRevoke = await request.get('/api/vault/proxy', {
+      headers: { ...bearer(workingKey), 'x-octo-target': `${UPSTREAM_ORIGIN}/health` },
+    });
+    expect(afterRevoke.status()).toBe(401);
+  });
 });
