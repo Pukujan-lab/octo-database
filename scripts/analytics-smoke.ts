@@ -164,6 +164,52 @@ async function main(): Promise<void> {
     const rows = await readResultRows(bytes);
     check('the aggregate is the known one', JSON.stringify(rows) === JSON.stringify(EXPECTED_AGGREGATE), JSON.stringify(rows));
 
+    console.log('the dashboard read path answers');
+    const datasetsResponse = await fetch(`${baseUrl}/api/workspaces/${workspaceId}/datasets`, {
+      headers: api,
+    });
+    const datasets = await json<{
+      datasets?: Array<{ dataset: string; latestVersionId: string; partCount: number; rowCount: number }>;
+    }>(datasetsResponse);
+    const listedDataset = datasets.datasets?.find((item) => item.dataset === 'smoke-job-history');
+    check('the datasets route lists the registration', datasetsResponse.status === 200 && Boolean(listedDataset), String(datasetsResponse.status));
+    check('the listing points at the registered version', listedDataset?.latestVersionId === version.id);
+    check('the listing reports both parts and the fixture row count', listedDataset?.partCount === 2 && listedDataset?.rowCount === FIXTURE_ROWS.length, JSON.stringify(listedDataset));
+
+    const runsResponse = await fetch(`${baseUrl}/api/workspaces/${workspaceId}/analytics/runs`, {
+      headers: api,
+    });
+    const runs = await json<{ runs?: Array<{ jobId: string; state: string; resultId: string | null }> }>(
+      runsResponse
+    );
+    const listedRun = runs.runs?.find((item) => item.jobId === jobId);
+    check('the runs route lists the completed job', runsResponse.status === 200 && listedRun?.state === 'completed', String(runsResponse.status));
+    check('the run points at its result', listedRun?.resultId === jobStatus.resultId);
+
+    const rowsResponse = await fetch(
+      `${baseUrl}/api/workspaces/${workspaceId}/analytics/results/${jobStatus.resultId}/rows`,
+      { headers: { Authorization: api.Authorization } }
+    );
+    const dashboardRows = await json<{
+      columns?: string[];
+      rows?: Array<Record<string, unknown>>;
+      rowCount?: number;
+      truncated?: boolean;
+    }>(rowsResponse);
+    const normalized = (dashboardRows.rows ?? []).map((row) => ({
+      job_type: String(row['job_type']),
+      month: String(row['month']).slice(0, 10),
+      failure_count: Number(row['failure_count']),
+    }));
+    check('the rows route answers', rowsResponse.status === 200, String(rowsResponse.status));
+    check(
+      'the rows route carries the spec output columns',
+      JSON.stringify(dashboardRows.columns) === JSON.stringify(['job_type', 'month', 'failure_count']),
+      JSON.stringify(dashboardRows.columns)
+    );
+    check('the rows route returns the known aggregate', JSON.stringify(normalized) === JSON.stringify(EXPECTED_AGGREGATE), JSON.stringify(normalized));
+    check('the rows route reports the artifact row count', dashboardRows.rowCount === EXPECTED_AGGREGATE.length && dashboardRows.truncated === false);
+
     console.log('the MCP surface advertises and answers the analytics tools');
     const mcpHeaders = {
       Authorization: `Bearer ${rawSecret}`,

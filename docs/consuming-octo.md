@@ -177,11 +177,14 @@ Four rules define the surface:
 | Call | Method and path | Scope | What it does |
 | --- | --- | --- | --- |
 | `datasets.register` | `POST /api/workspaces/<id>/datasets` | write | Register one immutable Parquet dataset version. |
+| `datasets.list` | `GET /api/workspaces/<id>/datasets` | read | List the workspace's datasets with their newest version. |
 | `analytics.query` | `POST /api/workspaces/<id>/analytics/queries` | read | Submit one named query over a version. |
 | `analytics.query_status` | `GET /api/workspaces/<id>/analytics/queries/<jobId>` | read | Read the job's state and, once completed, its result. |
+| `analytics.runs` | `GET /api/workspaces/<id>/analytics/runs` | read | List recent analytics jobs with their artifacts. |
 | `analytics.result` | `GET /api/workspaces/<id>/analytics/results/<resultId>` | read | Result metadata plus a short-lived download URL. |
+| `analytics.result_rows` | `GET /api/workspaces/<id>/analytics/results/<resultId>/rows` | read | The result artifact as JSON rows (the dashboard read path). |
 
-All four require **member** role in the workspace. The named key class `analytics` is
+All of them require **member** role in the workspace. The named key class `analytics` is
 read-only, so it can query but cannot register — registration needs a key with the
 `write` scope.
 
@@ -258,6 +261,36 @@ GET /api/workspaces/<id>/analytics/results/<resultId>
 (`/api/workspaces/<id>/analytics/results/<resultId>/content`) on a local storage
 backend. The artifact is Parquet; read it with DuckDB, pandas, Polars, or pyarrow.
 `contentHash` is the SHA-256 of the bytes, so a re-run can be compared for determinism.
+
+### 4. Read the result as rows
+
+```
+GET /api/workspaces/<id>/analytics/results/<resultId>/rows?limit=500
+→ { resultId, querySpec, columns: ["job_type", "month", "failure_count"],
+    rows: [{ job_type: "archive_file", month: "2026-01-01 00:00:00", failure_count: 2 }],
+    rowCount, truncated }
+```
+
+This is the dashboard's read path: the artifact is materialized in DuckDB and returned
+as JSON, with dates and decimals as strings and integer/decimal columns as numbers. The
+default and maximum `limit` is 500; `rowCount` is the artifact's total and `truncated`
+says whether rows were omitted. Month buckets are timestamps at midnight UTC.
+
+Two catalog reads make the dashboard cheap to load without touching the engine:
+
+```
+GET /api/workspaces/<id>/datasets
+→ { datasets: [{ datasetId, dataset, name, latestVersionId, latestVersion,
+                 versionCount, rowCount, partCount, watermark, createdAt }] }
+
+GET /api/workspaces/<id>/analytics/runs
+→ { runs: [{ jobId, state, errorCode, errorSummary, datasetVersionId,
+             querySpec, resultId, rowCount, contentHash, engineVersion,
+             createdAt, completedAt }] }
+```
+
+The workspace portal's **Analytics** view uses these three routes; no additional API
+is needed to build an analytics dashboard against Octo.
 
 ### Through MCP
 
