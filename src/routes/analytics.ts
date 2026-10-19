@@ -11,7 +11,7 @@
 
 import { randomUUID } from 'crypto';
 import { registerDatasetVersion } from '../analytics/registration';
-import { analyticsEngineStatus } from '../analytics/engine';
+import { analyticsEngineStatus, readParquetRows } from '../analytics/engine';
 import { getQuerySpec } from '../analytics/specs';
 import { assertWorkspaceKey } from '../analytics/paths';
 import { authenticateRequest, keyWorkspaceMatches, requireScope, roleAllows, scopeDenied } from '../server/auth-context';
@@ -22,6 +22,8 @@ import {
   dbGetAnalyticsResultByJob,
   dbGetDatasetVersion,
   dbGetWorkspaceMembership,
+  dbListAnalyticsRuns,
+  dbListDatasets,
   dbRegisterDatasetVersion,
 } from '../server/db';
 import { readJsonObject, requireUuid, sendJson } from '../server/http';
@@ -29,10 +31,12 @@ import { objectStore, r2Provider, UUID_PATTERN } from '../server/runtime';
 import { IncomingMessage, ServerResponse } from 'http';
 
 const REGISTER_PATH = /^\/api\/workspaces\/([^/]+)\/datasets$/;
+const RUNS_PATH = /^\/api\/workspaces\/([^/]+)\/analytics\/runs$/;
 const QUERIES_PATH = /^\/api\/workspaces\/([^/]+)\/analytics\/queries$/;
 const QUERY_STATUS_PATH = /^\/api\/workspaces\/([^/]+)\/analytics\/queries\/([^/]+)$/;
 const RESULT_PATH = /^\/api\/workspaces\/([^/]+)\/analytics\/results\/([^/]+)$/;
 const RESULT_CONTENT_PATH = /^\/api\/workspaces\/([^/]+)\/analytics\/results\/([^/]+)\/content$/;
+const RESULT_ROWS_PATH = /^\/api\/workspaces\/([^/]+)\/analytics\/results\/([^/]+)\/rows$/;
 
 const PRESIGNED_EXPIRY_SECONDS = 3600;
 
@@ -117,6 +121,23 @@ export async function handleAnalyticsRoutes(
     return true;
   }
 
+  // List the workspace's datasets: GET /api/workspaces/:id/datasets
+  if (registerMatch && req.method === 'GET') {
+    const workspaceId = registerMatch[1]!;
+    if (!(await authorize(req, res, workspaceId, 'read'))) return true;
+    sendJson(res, 200, { datasets: await dbListDatasets(workspaceId) });
+    return true;
+  }
+
+  // List recent analytics runs: GET /api/workspaces/:id/analytics/runs
+  const runsMatch = pathname.match(RUNS_PATH);
+  if (runsMatch && req.method === 'GET') {
+    const workspaceId = runsMatch[1]!;
+    if (!(await authorize(req, res, workspaceId, 'read'))) return true;
+    sendJson(res, 200, { runs: await dbListAnalyticsRuns(workspaceId) });
+    return true;
+  }
+
   // Submit one named query: POST /api/workspaces/:id/analytics/queries
   const queriesMatch = pathname.match(QUERIES_PATH);
   if (queriesMatch && req.method === 'POST') {
@@ -192,6 +213,36 @@ export async function handleAnalyticsRoutes(
       resultId: result?.id ?? null,
       result,
     });
+    return true;
+  }
+
+  // Result rows as JSON for the dashboard: GET .../results/:resultId/rows
+  const rowsMatch = pathname.match(RESULT_ROWS_PATH);
+  if (rowsMatch && req.method === 'GET') {
+    const workspaceId = rowsMatch[1]!;
+    const resultId = rowsMatch[2]!;
+    if (!(await authorize(req, res, workspaceId, 'read'))) return true;
+    if (!requireUuid(res, resultId, 'resultId')) return true;
+    if (!(await analyticsReady(res))) return true;
+
+    const result = await dbGetAnalyticsResult(workspaceId, resultId);
+    if (!result) {
+      sendJson(res, 404, { error: 'RESULT_NOT_FOUND' });
+      return true;
+    }
+    assertWorkspaceKey(result.objectKey, workspaceId);
+    const bytes = await objectStore!.get(result.objectKey);
+    if (!bytes) {
+      sendJson(res, 404, { error: 'RESULT_NOT_FOUND' });
+      return true;
+    }
+
+    const requested = Number(url.searchParams.get('limit') ?? '');
+    const rows = await readParquetRows(
+      bytes,
+      Number.isFinite(requested) && requested > 0 ? requested : undefined
+    );
+    sendJson(res, 200, { resultId, querySpec: result.querySpec, ...rows });
     return true;
   }
 

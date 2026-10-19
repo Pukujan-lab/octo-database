@@ -11,7 +11,12 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { GraphProjectionRow, GraphProjectionRecord } from '../types/graph';
 export type { GraphProjectionRow, GraphProjectionRecord } from '../types/graph';
 import type { RegisterVersionInput, RegisterVersionResult } from '../analytics/registration';
-import type { AnalyticsResultRecord, DatasetVersionRecord } from '../types/analytics';
+import type {
+  AnalyticsResultRecord,
+  AnalyticsRunSummary,
+  DatasetSummary,
+  DatasetVersionRecord,
+} from '../types/analytics';
 const { Pool } = pg;
 
 /**
@@ -3542,6 +3547,104 @@ export async function dbGetAnalyticsResultByJob(
     [jobId, workspaceId]
   );
   return rows[0] ? toAnalyticsResultRecord(rows[0]) : null;
+}
+
+/** Lists the workspace's logical datasets with their newest version. */
+export async function dbListDatasets(workspaceId: string): Promise<DatasetSummary[]> {
+  const rows = await queryService<{
+    datasetId: string;
+    dataset: string;
+    name: string;
+    latestVersionId: string;
+    latestVersion: number;
+    versionCount: number;
+    rowCount: number;
+    partCount: number;
+    watermark: string | null;
+    createdAt: string;
+  }>(
+    `SELECT d.id AS "datasetId", d.slug AS dataset, d.name,
+            v.id AS "latestVersionId", v.version AS "latestVersion",
+            (SELECT count(*) FROM octo.dataset_versions x WHERE x.dataset_id = d.id)::int AS "versionCount",
+            v.row_count::double precision AS "rowCount",
+            cardinality(v.object_keys) AS "partCount",
+            v.watermark,
+            v.created_at AS "createdAt"
+     FROM octo.datasets d
+     JOIN LATERAL (
+       SELECT * FROM octo.dataset_versions v
+       WHERE v.dataset_id = d.id
+       ORDER BY v.version DESC
+       LIMIT 1
+     ) v ON true
+     WHERE d.workspace_id = $1
+     ORDER BY d.slug`,
+    [workspaceId]
+  );
+  return rows.map((row) => ({
+    datasetId: row.datasetId,
+    dataset: row.dataset,
+    name: row.name,
+    latestVersionId: row.latestVersionId,
+    latestVersion: Number(row.latestVersion),
+    versionCount: Number(row.versionCount),
+    rowCount: Number(row.rowCount ?? 0),
+    partCount: Number(row.partCount ?? 0),
+    watermark: row.watermark === null || row.watermark === undefined ? null : String(row.watermark),
+    createdAt: isoInstant(row.createdAt),
+  }));
+}
+
+/** Lists the workspace's analytics_query jobs, newest first, with their artifact. */
+export async function dbListAnalyticsRuns(
+  workspaceId: string,
+  limit = 20
+): Promise<AnalyticsRunSummary[]> {
+  const rows = await queryService<{
+    jobId: string;
+    state: string;
+    errorCode: string | null;
+    errorSummary: string | null;
+    datasetVersionId: string | null;
+    querySpec: string | null;
+    resultId: string | null;
+    rowCount: number | null;
+    contentHash: string | null;
+    engineVersion: string | null;
+    createdAt: string;
+    completedAt: string | null;
+  }>(
+    `SELECT j.id AS "jobId", j.state,
+            j.error_code AS "errorCode", j.error_summary AS "errorSummary",
+            j.payload->>'datasetVersionId' AS "datasetVersionId",
+            j.payload->>'querySpec' AS "querySpec",
+            r.id AS "resultId",
+            r.row_count::double precision AS "rowCount",
+            r.content_hash AS "contentHash",
+            r.engine_version AS "engineVersion",
+            j.created_at AS "createdAt", j.completed_at AS "completedAt"
+     FROM octo.jobs j
+     LEFT JOIN octo.analytics_results r ON r.job_id = j.id
+     WHERE j.workspace_id = $1 AND j.job_type = 'analytics_query'
+     ORDER BY j.created_at DESC
+     LIMIT $2`,
+    [workspaceId, limit]
+  );
+  return rows.map((row) => ({
+    jobId: row.jobId,
+    state: row.state,
+    errorCode: row.errorCode ?? null,
+    errorSummary: row.errorSummary ?? null,
+    datasetVersionId: row.datasetVersionId ?? null,
+    querySpec: row.querySpec ?? null,
+    resultId: row.resultId ?? null,
+    rowCount: row.rowCount === null || row.rowCount === undefined ? null : Number(row.rowCount),
+    contentHash: row.contentHash ?? null,
+    engineVersion: row.engineVersion ?? null,
+    createdAt: isoInstant(row.createdAt),
+    completedAt:
+      row.completedAt === null || row.completedAt === undefined ? null : isoInstant(row.completedAt),
+  }));
 }
 
 /**

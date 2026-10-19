@@ -14,8 +14,68 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { DuckDBConnection, DuckDBInstance } from '@duckdb/node-api';
-import { QuerySpec, sqlLiteral } from './specs';
-import type { ColumnSpec } from '../types/analytics';
+import { QuerySpec, sqlLiteral, typeFamily } from './specs';
+import type { AnalyticsRows, ColumnSpec } from '../types/analytics';
+
+/** Most rows the dashboard's result read returns in one response. */
+export const ANALYTICS_ROWS_LIMIT = 500;
+
+/**
+ * Reads a result artifact back as JSON rows. DuckDB's JSON row reader turns every
+ * value into a JSON primitive (dates, timestamps, and decimals as strings), and
+ * numeric columns are converted back to numbers so the dashboard can total them.
+ */
+export async function readParquetRows(
+  bytes: Buffer,
+  limit = ANALYTICS_ROWS_LIMIT
+): Promise<AnalyticsRows> {
+  const capped = Math.max(1, Math.min(Math.floor(limit), ANALYTICS_ROWS_LIMIT));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'octo-analytics-rows-'));
+  const file = path.join(dir, 'result.parquet');
+  fs.writeFileSync(file, bytes);
+
+  const { instance, connection } = await openInstance();
+  try {
+    const described = await (
+      await connection.run(`DESCRIBE SELECT * FROM read_parquet(${sqlLiteral(file)})`)
+    ).getRowObjects();
+    const numeric = new Set(
+      described
+        .filter((row) => ['integer', 'double'].includes(typeFamily(String(row['column_type']))))
+        .map((row) => String(row['column_name']))
+    );
+
+    const counted = await (
+      await connection.run(`SELECT count(*)::BIGINT AS n FROM read_parquet(${sqlLiteral(file)})`)
+    ).getRowObjects();
+    const total = Number(counted[0]?.['n'] ?? 0);
+
+    const reader = await connection.runAndReadAll(
+      `SELECT * FROM read_parquet(${sqlLiteral(file)}) LIMIT ${capped}`
+    );
+    const raw = reader.getRowObjectsJson();
+    const rows = raw.map((row) => {
+      const out: Record<string, unknown> = {};
+      for (const [name, value] of Object.entries(row)) {
+        out[name] =
+          numeric.has(name) && typeof value === 'string' && value.trim() !== ''
+            ? Number(value)
+            : value;
+      }
+      return out;
+    });
+
+    return {
+      columns: described.map((row) => String(row['column_name'])),
+      rows,
+      rowCount: total,
+      truncated: total > rows.length,
+    };
+  } finally {
+    closeQuietly(instance, connection);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 export const ANALYTICS_MAX_MEMORY = '512MB';
 export const ANALYTICS_QUERY_TIMEOUT_MS = 30000;
