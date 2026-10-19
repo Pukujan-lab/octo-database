@@ -26,6 +26,7 @@ import {
   STALE_PURGE_MS,
   type VaultItemInput,
   type VaultKind,
+  type VaultRouteInput,
 } from '../lib/vault-policy';
 import { authenticateRequest } from '../server/auth-context';
 import { confirmGate } from '../server/confirm';
@@ -204,6 +205,12 @@ export const handleVaultRoutes: RouteHandler = async (req, res, url) => {
 
     const auth = await authenticateRequest(req);
     if (!auth) {
+      if (bearer(req)?.startsWith(GRANT_PREFIX)) {
+        sendJson(res, 403, {
+          error: 'FORBIDDEN: a vault grant cannot call this endpoint. Use /api/vault/open and /api/vault/open/lease.',
+        });
+        return true;
+      }
       sendJson(res, 401, { error: 'UNAUTHORIZED: sign in to use the vault.' });
       return true;
     }
@@ -702,15 +709,48 @@ async function openCabinet(req: IncomingMessage, res: ServerResponse, url: URL):
   return true;
 }
 
+type LeaseRouteInput = Pick<
+  VaultRouteInput,
+  'baseUrl' | 'authScheme' | 'authHeader' | 'bodyField' | 'basicUsername'
+>;
+
+/**
+ * A route-less item can still be leased when the caller names the vendor base
+ * URL. This is how an imported token that never had a url becomes usable: the
+ * grant knows where the key belongs, and the derived route is persisted so the
+ * owner sees it and later leases reuse it.
+ */
+function parseLeaseRoute(
+  body: Record<string, unknown>
+): { ok: true; value: LeaseRouteInput | null } | { ok: false; error: string } {
+  const baseUrl = body['baseUrl'];
+  if (baseUrl === undefined || baseUrl === null || baseUrl === '') return { ok: true, value: null };
+  const parsed = parseVaultRoute({
+    name: 'lease route',
+    baseUrl,
+    authScheme: body['authScheme'] ?? 'bearer',
+    authHeader: body['authHeader'],
+    bodyField: body['bodyField'],
+    basicUsername: body['basicUsername'],
+  });
+  if (!parsed.ok) return parsed;
+  return { ok: true, value: parsed.value };
+}
+
 /**
  * A key item that carries its own url is usable without a hand-made route: the
  * url is the upstream base, and a bearer header is the common case. An explicit
- * route always wins — this only fills the gap when the item has none.
+ * route always wins, then the lease-time baseUrl, then the item's own url.
  */
-async function ensureDerivedRoute(item: VaultItemRow, principalId: string): Promise<VaultRouteRow[]> {
+async function ensureDerivedRoute(
+  item: VaultItemRow,
+  principalId: string,
+  supplied: LeaseRouteInput | null
+): Promise<VaultRouteRow[]> {
   const existing = await dbListVaultRoutesForGrant(item.id);
   if (existing.length > 0) return existing;
-  if (!item.url || !/^https?:\/\//i.test(item.url)) return existing;
+  const baseUrl = supplied?.baseUrl ?? item.url;
+  if (!baseUrl || !/^https?:\/\//i.test(baseUrl)) return existing;
 
   await dbInsertVaultRouteService({
     id: randomUUID(),
@@ -719,8 +759,12 @@ async function ensureDerivedRoute(item: VaultItemRow, principalId: string): Prom
     // route_key is unique across the table, so the suffix keeps two cabinets
     // with the same item label from colliding.
     routeKey: `${routeKeySlug(item.label)}-auto-${randomBytes(3).toString('hex')}`,
-    name: `${item.label} (from url)`,
-    baseUrl: item.url,
+    name: supplied ? `${item.label} (from lease)` : `${item.label} (from url)`,
+    baseUrl,
+    authScheme: supplied?.authScheme,
+    authHeader: supplied?.authHeader,
+    bodyField: supplied?.bodyField,
+    basicUsername: supplied?.basicUsername,
   });
   return dbListVaultRoutesForGrant(item.id);
 }
@@ -741,6 +785,11 @@ async function mintLease(req: IncomingMessage, res: ServerResponse, url: URL): P
   const days = parseLeaseDays(body['expiresInDays']);
   if (!days.ok) {
     sendJson(res, 400, { error: days.error });
+    return true;
+  }
+  const supplied = parseLeaseRoute(body);
+  if (!supplied.ok) {
+    sendJson(res, 400, { error: supplied.error });
     return true;
   }
 
@@ -765,10 +814,15 @@ async function mintLease(req: IncomingMessage, res: ServerResponse, url: URL): P
     return true;
   }
 
-  const routes = await ensureDerivedRoute(item, grant.principalId);
+  const routes = await ensureDerivedRoute(item, grant.principalId, supplied.value);
   if (routes.length === 0) {
     sendJson(res, 400, {
-      error: 'ROUTE_REQUIRED: that item has no relay route. Give it a url, or add a route from the dashboard.',
+      error:
+        'ROUTE_REQUIRED: that item has no relay route. Retry with baseUrl (and authScheme when the vendor is not bearer), or add a route from the dashboard.',
+      code: 'ROUTE_REQUIRED',
+      itemId: item.id,
+      itemLabel: item.label,
+      requires: 'baseUrl',
     });
     return true;
   }
