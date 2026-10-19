@@ -45,7 +45,6 @@ import {
   dbInsertVaultItemsBulk,
   dbInsertVaultLeaseService,
   dbInsertVaultRoute,
-  dbInsertVaultRouteService,
   dbListVaultGrants,
   dbListVaultItems,
   dbListVaultItemsForGrant,
@@ -715,10 +714,9 @@ type LeaseRouteInput = Pick<
 >;
 
 /**
- * A route-less item can still be leased when the caller names the vendor base
- * URL. This is how an imported token that never had a url becomes usable: the
- * grant knows where the key belongs, and the derived route is persisted so the
- * owner sees it and later leases reuse it.
+ * Optional lease-time injection recipe. The caller may name the vendor base URL
+ * and scheme it wants the working key to use; the lease stores that recipe and
+ * the proxy applies it to whatever upstream the caller names per request.
  */
 function parseLeaseRoute(
   body: Record<string, unknown>
@@ -738,35 +736,48 @@ function parseLeaseRoute(
 }
 
 /**
- * A key item that carries its own url is usable without a hand-made route: the
- * url is the upstream base, and a bearer header is the common case. An explicit
- * route always wins, then the lease-time baseUrl, then the item's own url.
+ * The injection recipe a working key carries. It is copied onto the lease, so
+ * the key is a free-form credential: the caller names any upstream per request
+ * and Octo only needs to know how to place the secret. A lease-time recipe
+ * wins, then an existing dashboard route, then the item's own url (bearer).
  */
-async function ensureDerivedRoute(
+function leaseRecipe(
   item: VaultItemRow,
-  principalId: string,
-  supplied: LeaseRouteInput | null
-): Promise<VaultRouteRow[]> {
-  const existing = await dbListVaultRoutesForGrant(item.id);
-  if (existing.length > 0) return existing;
-  const baseUrl = supplied?.baseUrl ?? item.url;
-  if (!baseUrl || !/^https?:\/\//i.test(baseUrl)) return existing;
-
-  await dbInsertVaultRouteService({
-    id: randomUUID(),
-    principalId,
-    itemId: item.id,
-    // route_key is unique across the table, so the suffix keeps two cabinets
-    // with the same item label from colliding.
-    routeKey: `${routeKeySlug(item.label)}-auto-${randomBytes(3).toString('hex')}`,
-    name: supplied ? `${item.label} (from lease)` : `${item.label} (from url)`,
-    baseUrl,
-    authScheme: supplied?.authScheme,
-    authHeader: supplied?.authHeader,
-    bodyField: supplied?.bodyField,
-    basicUsername: supplied?.basicUsername,
-  });
-  return dbListVaultRoutesForGrant(item.id);
+  supplied: LeaseRouteInput | null,
+  routes: VaultRouteRow[]
+): {
+  baseUrl: string | null;
+  authScheme: string;
+  authHeader: string | null;
+  bodyField: string | null;
+  basicUsername: string | null;
+} {
+  if (supplied) {
+    return {
+      baseUrl: supplied.baseUrl,
+      authScheme: supplied.authScheme,
+      authHeader: supplied.authHeader ?? null,
+      bodyField: supplied.bodyField ?? null,
+      basicUsername: supplied.basicUsername ?? null,
+    };
+  }
+  const route = routes[0];
+  if (route) {
+    return {
+      baseUrl: route.baseUrl,
+      authScheme: route.authScheme,
+      authHeader: route.authHeader,
+      bodyField: route.bodyField,
+      basicUsername: route.basicUsername,
+    };
+  }
+  return {
+    baseUrl: item.url && /^https?:\/\//i.test(item.url) ? item.url : null,
+    authScheme: 'bearer',
+    authHeader: null,
+    bodyField: null,
+    basicUsername: null,
+  };
 }
 
 /**
@@ -814,18 +825,8 @@ async function mintLease(req: IncomingMessage, res: ServerResponse, url: URL): P
     return true;
   }
 
-  const routes = await ensureDerivedRoute(item, grant.principalId, supplied.value);
-  if (routes.length === 0) {
-    sendJson(res, 400, {
-      error:
-        'ROUTE_REQUIRED: that item has no relay route. Retry with baseUrl (and authScheme when the vendor is not bearer), or add a route from the dashboard.',
-      code: 'ROUTE_REQUIRED',
-      itemId: item.id,
-      itemLabel: item.label,
-      requires: 'baseUrl',
-    });
-    return true;
-  }
+  const routes = await dbListVaultRoutesForGrant(item.id);
+  const recipe = leaseRecipe(item, supplied.value, routes);
 
   const token = mintLeaseToken();
   const id = randomUUID();
@@ -839,11 +840,24 @@ async function mintLease(req: IncomingMessage, res: ServerResponse, url: URL): P
     prefix: token.prefix,
     name: `${grant.grantName} / ${item.label}`.slice(0, 200),
     expiresAt,
+    baseUrl: recipe.baseUrl,
+    authScheme: recipe.authScheme,
+    authHeader: recipe.authHeader,
+    bodyField: recipe.bodyField,
+    basicUsername: recipe.basicUsername,
   });
   const origin = getPublicOrigin(req, url);
   sendJson(res, 201, {
     lease: { id, itemId: item.id, itemLabel: item.label, prefix: token.prefix, expiresAt },
     rawSecret: token.raw,
+    proxy: {
+      url: `${origin}/api/vault/proxy`,
+      targetHeader: 'x-octo-target',
+      defaultTarget: recipe.baseUrl,
+      hint:
+        'Send the working key as a Bearer token and the vendor URL in x-octo-target. ' +
+        'Any http(s) target works; defaultTarget is used when the target is a path suffix.',
+    },
     routes: routes.map((route) => relayRoute(origin, route)),
   });
   return true;
