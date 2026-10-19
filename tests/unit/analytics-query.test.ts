@@ -13,6 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { AnalyticsJobDeps, runAnalyticsJob } from '../../src/analytics/job';
+import { readParquetRows } from '../../src/analytics/engine';
 import { resultObjectKey } from '../../src/analytics/paths';
 import { LocalObjectStore } from '../../src/storage/object-store';
 import type { DatasetVersionRecord } from '../../src/types/analytics';
@@ -159,8 +160,7 @@ describe('analytics_query job', () => {
     expect(outcome.code).toBe('PARQUET_MISSING');
   });
 
-  it('MR-C: refuses a catalog key outside the job workspace', async () => {
-    const other = randomUUID();
+  it('MR-C: refuses a catalog key outside the job workspace', async () => {    const other = randomUUID();
     const version = await seedVersion(other);
 
     await expect(
@@ -169,5 +169,45 @@ describe('analytics_query job', () => {
         deps(version).deps
       )
     ).rejects.toThrow(/UNSAFE_OBJECT_KEY/);
+  });
+
+  it('reads a result artifact back as JSON rows for the dashboard', async () => {
+    const version = await seedVersion();
+    const resultId = randomUUID();
+    const outcome = await runAnalyticsJob(
+      job({ datasetVersionId: version.id, querySpec: 'job-failures-by-type-month@1', resultId }),
+      deps(version).deps
+    );
+    if (!outcome.ok) throw new Error(outcome.summary);
+
+    const bytes = await STORE.get(resultObjectKey(WORKSPACE, resultId));
+    if (!bytes) throw new Error('the result artifact is missing');
+    const rows = await readParquetRows(bytes);
+
+    expect(rows.columns).toEqual(['job_type', 'month', 'failure_count']);
+    expect(rows.rowCount).toBe(2);
+    expect(rows.truncated).toBe(false);
+    expect(rows.rows).toEqual([
+      { job_type: 'archive_file', month: '2026-01-01 00:00:00', failure_count: 2 },
+      { job_type: 'thumbnail', month: '2026-02-01 00:00:00', failure_count: 1 },
+    ]);
+  });
+
+  it('caps the dashboard row read and reports the truncation', async () => {
+    const version = await seedVersion();
+    const resultId = randomUUID();
+    const outcome = await runAnalyticsJob(
+      job({ datasetVersionId: version.id, querySpec: 'job-failures-by-type-month@1', resultId }),
+      deps(version).deps
+    );
+    if (!outcome.ok) throw new Error(outcome.summary);
+
+    const bytes = await STORE.get(resultObjectKey(WORKSPACE, resultId));
+    if (!bytes) throw new Error('the result artifact is missing');
+    const rows = await readParquetRows(bytes, 1);
+
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rowCount).toBe(2);
+    expect(rows.truncated).toBe(true);
   });
 });

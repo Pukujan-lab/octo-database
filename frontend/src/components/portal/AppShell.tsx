@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { formatClock } from "@/lib/format";
 import type { Principal, Workspace } from "@/lib/types";
 import {
+  ChartColumn,
   ChevronDown,
   Clock,
   FolderOpen,
@@ -18,13 +19,21 @@ import {
   Workflow,
 } from "lucide-react";
 
-export type ViewId = "overview" | "files" | "gallery" | "operations" | "access" | "vault";
+export type ViewId =
+  | "overview"
+  | "files"
+  | "gallery"
+  | "operations"
+  | "analytics"
+  | "access"
+  | "vault";
 
 export const VIEWS: Array<{ id: ViewId; label: string; icon: typeof LayoutDashboard }> = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "files", label: "Files", icon: FolderOpen },
   { id: "gallery", label: "Gallery", icon: Images },
   { id: "operations", label: "Operations", icon: Workflow },
+  { id: "analytics", label: "Analytics", icon: ChartColumn },
   { id: "access", label: "Access", icon: Shield },
   { id: "vault", label: "Keys", icon: KeyRound },
 ];

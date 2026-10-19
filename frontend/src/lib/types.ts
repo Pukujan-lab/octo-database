@@ -24,6 +24,7 @@ export type Health = {
   r2: { connected: boolean; bucket?: string | null };
   googleAuthEnabled: boolean;
   turnstileSiteKey: string | null;
+  analytics?: { configured: boolean; engine: string; version: string | null };
 };
 
 export type Workspace = {
@@ -76,6 +77,46 @@ export type ActivityRow = {
   summary: string;
   jobId: string | null;
   createdAt: string;
+};
+
+/** One logical dataset with its newest immutable version (Slice 7). */
+export type DatasetSummary = {
+  datasetId: string;
+  dataset: string;
+  name: string;
+  latestVersionId: string;
+  latestVersion: number;
+  versionCount: number;
+  rowCount: number;
+  partCount: number;
+  watermark: string | null;
+  createdAt: string;
+};
+
+/** One analytics_query job with its result artifact, if it has one. */
+export type AnalyticsRunSummary = {
+  jobId: string;
+  state: string;
+  errorCode: string | null;
+  errorSummary: string | null;
+  datasetVersionId: string | null;
+  querySpec: string | null;
+  resultId: string | null;
+  rowCount: number | null;
+  contentHash: string | null;
+  engineVersion: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+/** Result artifact rows, normalized for JSON. */
+export type AnalyticsRows = {
+  resultId: string;
+  querySpec: string;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  rowCount: number;
+  truncated: boolean;
 };
 
 export type ApiKey = {

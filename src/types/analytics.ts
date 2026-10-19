@@ -31,3 +31,41 @@ export interface AnalyticsResultRecord {
   engineVersion: string;
   createdAt: string;
 }
+
+/** One logical dataset with its newest immutable version. */
+export interface DatasetSummary {
+  datasetId: string;
+  dataset: string;
+  name: string;
+  latestVersionId: string;
+  latestVersion: number;
+  versionCount: number;
+  rowCount: number;
+  partCount: number;
+  watermark: string | null;
+  createdAt: string;
+}
+
+/** One analytics_query job with its artifact, if it has one. */
+export interface AnalyticsRunSummary {
+  jobId: string;
+  state: string;
+  errorCode: string | null;
+  errorSummary: string | null;
+  datasetVersionId: string | null;
+  querySpec: string | null;
+  resultId: string | null;
+  rowCount: number | null;
+  contentHash: string | null;
+  engineVersion: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+/** Result artifact rows, normalized for JSON (the dashboard's read path). */
+export interface AnalyticsRows {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  rowCount: number;
+  truncated: boolean;
+}

@@ -39,7 +39,7 @@ process.env['OCTO_SERVICE_URL'] = process.env['OCTO_SERVICE_URL'] || databaseUrl
 
 const { registerDatasetVersion } = await import('../src/analytics/registration');
 const { runAnalyticsJob } = await import('../src/analytics/job');
-const { analyticsEngineStatus } = await import('../src/analytics/engine');
+const { analyticsEngineStatus, readParquetRows } = await import('../src/analytics/engine');
 const { resultObjectKey } = await import('../src/analytics/paths');
 const {
   dbEnqueueJob,
@@ -47,6 +47,8 @@ const {
   dbGetDatasetVersion,
   dbRegisterAnalyticsResult,
   dbGetAnalyticsResult,
+  dbListAnalyticsRuns,
+  dbListDatasets,
 } = await import('../src/server/db');
 const { LocalObjectStore } = await import('../src/storage/object-store');
 const {
@@ -121,6 +123,8 @@ async function postgresOracle(): Promise<Array<{ job_type: string; month: string
 async function runQuery(datasetVersionId: string): Promise<{
   ok: boolean;
   summary: string;
+  jobId: string;
+  resultId: string;
   rows: Array<{ job_type: string; month: string; failure_count: number }>;
   contentHash: string | null;
   engineVersion: string | null;
@@ -151,8 +155,18 @@ async function runQuery(datasetVersionId: string): Promise<{
   );
 
   if (!outcome.ok) {
-    return { ok: false, summary: `${outcome.code}: ${outcome.summary}`, rows: [], contentHash: null, engineVersion: null };
+    await db.query(
+      `UPDATE octo.jobs SET state = 'failed', error_code = $2, error_summary = $3, completed_at = now() WHERE id = $1`,
+      [jobId, outcome.code, outcome.summary]
+    );
+    return { ok: false, summary: `${outcome.code}: ${outcome.summary}`, jobId, resultId, rows: [], contentHash: null, engineVersion: null };
   }
+
+  // The worker owns the state transition; this harness runs the job directly.
+  await db.query(
+    `UPDATE octo.jobs SET state = 'completed', completed_at = now() WHERE id = $1`,
+    [jobId]
+  );
 
   const key = resultObjectKey(workspaceId!, resultId);
   const bytes = await store.get(key);
@@ -160,6 +174,8 @@ async function runQuery(datasetVersionId: string): Promise<{
   return {
     ok: Boolean(bytes && record),
     summary: outcome.detail,
+    jobId,
+    resultId,
     rows: bytes ? await readResultRows(bytes) : [],
     contentHash: bytes ? createHash('sha256').update(bytes).digest('hex') : null,
     engineVersion: record?.engineVersion ?? null,
@@ -217,6 +233,38 @@ async function main(): Promise<void> {
     const second = await runQuery(outcome.version.id);
     check('the second run completes', second.ok, second.summary);
     check('the second run returns the same logical rows', JSON.stringify(second.rows) === JSON.stringify(first.rows));
+
+    console.log('the dashboard read path returns the same rows');
+    const resultBytes = await store.get(resultObjectKey(workspaceId!, first.resultId!));
+    check('the result artifact is readable from the store', resultBytes !== null);
+    if (resultBytes) {
+      const read = await readParquetRows(resultBytes);
+      check('the dashboard columns are the spec output', JSON.stringify(read.columns) === JSON.stringify(['job_type', 'month', 'failure_count']));
+      // The artifact stores the month bucket as a TIMESTAMP at midnight; the
+      // dashboard compares it as the logical date.
+      const readRows = read.rows.map((row) => ({
+        job_type: String(row['job_type']),
+        month: String(row['month']).slice(0, 10),
+        failure_count: Number(row['failure_count']),
+      }));
+      check('the dashboard rows match the aggregate', JSON.stringify(readRows) === JSON.stringify(EXPECTED_AGGREGATE), JSON.stringify(readRows));
+      check('the dashboard read is complete', read.rowCount === EXPECTED_AGGREGATE.length && !read.truncated);
+    }
+
+    console.log('the dashboard catalog lists the dataset and its runs');
+    const datasets = await dbListDatasets(workspaceId!);
+    const listed = datasets.find((dataset) => dataset.dataset === 'verify-job-history');
+    check('the dataset is listed', Boolean(listed));
+    check('the listing points at the registered version', listed?.latestVersionId === outcome.version.id);
+    check('the listing reports both parts', listed?.partCount === 2, `partCount=${listed?.partCount}`);
+    check('the listing reports the fixture row count', listed?.rowCount === FIXTURE_ROWS.length, `rowCount=${listed?.rowCount}`);
+
+    const runs = await dbListAnalyticsRuns(workspaceId!);
+    const completed = runs.find((run) => run.jobId === first.jobId);
+    check('the run is listed', Boolean(completed));
+    check('the run records its state', completed?.state === 'completed', String(completed?.state));
+    check('the run points at its result', completed?.resultId === first.resultId);
+    check('the run reports its row count', completed?.rowCount === EXPECTED_AGGREGATE.length, `rowCount=${completed?.rowCount}`);
 
     console.log('a corrupt part fails the job deterministically');
     const corruptRegistration = await registerDatasetVersion(
