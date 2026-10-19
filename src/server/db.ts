@@ -10,6 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { GraphProjectionRow, GraphProjectionRecord } from '../types/graph';
 export type { GraphProjectionRow, GraphProjectionRecord } from '../types/graph';
+import type { RegisterVersionInput, RegisterVersionResult } from '../analytics/registration';
+import type { AnalyticsResultRecord, DatasetVersionRecord } from '../types/analytics';
 const { Pool } = pg;
 
 /**
@@ -3275,3 +3277,248 @@ export async function dbConsumeVaultLease(keyHash: string, routeKey: string): Pr
   );
   return rows[0] ?? null;
 }
+
+// 6. Analytics catalog (Slice 7)
+//
+// The catalog is written and read by the trusted route/worker surface only, so
+// every helper here uses the service pool. The app pool is RLS-fenced and the
+// migration grants no DML to it.
+
+const DATASET_VERSION_COLUMNS = `
+  v.id, v.dataset_id AS "datasetId", d.slug AS dataset, v.version, v.format,
+  v.schema, v.object_keys AS "objectKeys",
+  v.row_count::double precision AS "rowCount", v.provenance, v.watermark,
+  v.created_at AS "createdAt"
+`;
+
+const ANALYTICS_RESULT_COLUMNS = `
+  id, dataset_version_id AS "datasetVersionId", query_spec AS "querySpec",
+  object_key AS "objectKey", row_count::double precision AS "rowCount",
+  content_hash AS "contentHash", engine_version AS "engineVersion",
+  created_at AS "createdAt"
+`;
+
+function isoInstant(value: unknown): string {
+  return value instanceof Date ? value.toISOString() : String(value);
+}
+
+function toDatasetVersionRecord(row: Record<string, unknown>): DatasetVersionRecord {
+  return {
+    id: String(row['id']),
+    datasetId: String(row['datasetId']),
+    dataset: String(row['dataset']),
+    version: Number(row['version']),
+    format: String(row['format']),
+    schema: (row['schema'] ?? []) as DatasetVersionRecord['schema'],
+    objectKeys: (row['objectKeys'] ?? []) as string[],
+    rowCount: Number(row['rowCount'] ?? 0),
+    provenance: (row['provenance'] ?? {}) as Record<string, unknown>,
+    watermark:
+      row['watermark'] === null || row['watermark'] === undefined ? null : String(row['watermark']),
+    createdAt: isoInstant(row['createdAt']),
+  };
+}
+
+function toAnalyticsResultRecord(row: Record<string, unknown>): AnalyticsResultRecord {
+  return {
+    id: String(row['id']),
+    datasetVersionId: String(row['datasetVersionId']),
+    querySpec: String(row['querySpec']),
+    objectKey: String(row['objectKey']),
+    rowCount: Number(row['rowCount'] ?? 0),
+    contentHash: String(row['contentHash']),
+    engineVersion: String(row['engineVersion']),
+    createdAt: isoInstant(row['createdAt']),
+  };
+}
+
+/**
+ * Assigns the next version for a logical dataset, writes the caller's objects,
+ * and inserts the immutable version row in one transaction. The dataset row is
+ * locked, so two concurrent registrations of the same slug serialize instead of
+ * colliding on the version number.
+ */
+export async function dbRegisterDatasetVersion(
+  input: RegisterVersionInput
+): Promise<RegisterVersionResult> {
+  try {
+    return await withTransaction(async (tx) => {
+      let dataset = (
+        await tx.query(
+          'SELECT id FROM octo.datasets WHERE workspace_id = $1 AND slug = $2 FOR UPDATE',
+          [input.workspaceId, input.slug]
+        )
+      ).rows[0] as { id: string } | undefined;
+
+      if (!dataset) {
+        const inserted = await tx.query(
+          `INSERT INTO octo.datasets (workspace_id, slug, name, created_by)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (workspace_id, slug) DO NOTHING
+           RETURNING id`,
+          [input.workspaceId, input.slug, input.name, input.createdBy]
+        );
+        dataset = inserted.rows[0] as { id: string } | undefined;
+        if (!dataset) {
+          dataset = (
+            await tx.query(
+              'SELECT id FROM octo.datasets WHERE workspace_id = $1 AND slug = $2 FOR UPDATE',
+              [input.workspaceId, input.slug]
+            )
+          ).rows[0] as { id: string } | undefined;
+        }
+      }
+      if (!dataset) throw new Error('DATASET_INSERT_FAILED');
+
+      if (input.idempotencyKey) {
+        const existing = await tx.query(
+          `SELECT ${DATASET_VERSION_COLUMNS}
+           FROM octo.dataset_versions v
+           JOIN octo.datasets d ON d.id = v.dataset_id
+           WHERE v.dataset_id = $1 AND v.idempotency_key = $2`,
+          [dataset.id, input.idempotencyKey]
+        );
+        if (existing.rows[0]) {
+          return {
+            status: 'existing' as const,
+            version: toDatasetVersionRecord(existing.rows[0] as Record<string, unknown>),
+          };
+        }
+      }
+
+      const next = (
+        await tx.query(
+          'SELECT COALESCE(max(version), 0) + 1 AS version FROM octo.dataset_versions WHERE dataset_id = $1',
+          [dataset.id]
+        )
+      ).rows[0] as { version: number };
+      const version = Number(next.version);
+
+      const objectKeys = input.buildObjectKeys(version);
+      await input.writeObjects(objectKeys);
+
+      const inserted = await tx.query(
+        `INSERT INTO octo.dataset_versions
+           (workspace_id, dataset_id, version, format, schema, provenance, watermark,
+            row_count, object_keys, idempotency_key, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING id`,
+        [
+          input.workspaceId,
+          dataset.id,
+          version,
+          input.format,
+          JSON.stringify(input.schema),
+          JSON.stringify(input.provenance),
+          input.watermark,
+          input.rowCount,
+          objectKeys,
+          input.idempotencyKey,
+          input.createdBy,
+        ]
+      );
+
+      const row = (
+        await tx.query(
+          `SELECT ${DATASET_VERSION_COLUMNS}
+           FROM octo.dataset_versions v
+           JOIN octo.datasets d ON d.id = v.dataset_id
+           WHERE v.id = $1`,
+          [(inserted.rows[0] as { id: string }).id]
+        )
+      ).rows[0] as Record<string, unknown>;
+
+      return { status: 'created' as const, version: toDatasetVersionRecord(row) };
+    }, servicePool);
+  } catch (error) {
+    if ((error as { code?: string }).code === '23505') return { status: 'conflict' };
+    throw error;
+  }
+}
+
+export async function dbGetDatasetVersion(
+  workspaceId: string,
+  datasetVersionId: string
+): Promise<DatasetVersionRecord | null> {
+  const rows = await queryService<Record<string, unknown>>(
+    `SELECT ${DATASET_VERSION_COLUMNS}
+     FROM octo.dataset_versions v
+     JOIN octo.datasets d ON d.id = v.dataset_id
+     WHERE v.workspace_id = $1 AND v.id = $2`,
+    [workspaceId, datasetVersionId]
+  );
+  return rows[0] ? toDatasetVersionRecord(rows[0]) : null;
+}
+
+export async function dbGetAnalyticsJob(workspaceId: string, jobId: string): Promise<DbJobRow | null> {
+  const rows = await queryService<DbJobRow>(
+    `SELECT ${JOB_COLUMNS} FROM octo.jobs
+     WHERE id = $1 AND workspace_id = $2 AND job_type = 'analytics_query'`,
+    [jobId, workspaceId]
+  );
+  return rows[0] ?? null;
+}
+
+export async function dbGetAnalyticsResult(
+  workspaceId: string,
+  resultId: string
+): Promise<AnalyticsResultRecord | null> {
+  const rows = await queryService<Record<string, unknown>>(
+    `SELECT ${ANALYTICS_RESULT_COLUMNS} FROM octo.analytics_results
+     WHERE id = $1 AND workspace_id = $2`,
+    [resultId, workspaceId]
+  );
+  return rows[0] ? toAnalyticsResultRecord(rows[0]) : null;
+}
+
+export async function dbGetAnalyticsResultByJob(
+  workspaceId: string,
+  jobId: string
+): Promise<AnalyticsResultRecord | null> {
+  const rows = await queryService<Record<string, unknown>>(
+    `SELECT ${ANALYTICS_RESULT_COLUMNS} FROM octo.analytics_results
+     WHERE job_id = $1 AND workspace_id = $2`,
+    [jobId, workspaceId]
+  );
+  return rows[0] ? toAnalyticsResultRecord(rows[0]) : null;
+}
+
+/**
+ * Records one result artifact per job. The unique constraint on `job_id` makes a
+ * retry converge on the same row instead of registering a second artifact.
+ */
+export async function dbRegisterAnalyticsResult(input: {
+  workspaceId: string;
+  datasetVersionId: string;
+  jobId: string;
+  resultId: string;
+  querySpec: string;
+  objectKey: string;
+  rowCount: number;
+  contentHash: string;
+  engineVersion: string;
+}): Promise<AnalyticsResultRecord> {
+  await queryService(
+    `INSERT INTO octo.analytics_results
+       (id, workspace_id, dataset_version_id, job_id, query_spec, object_key,
+        row_count, content_hash, engine_version)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (job_id) DO NOTHING`,
+    [
+      input.resultId,
+      input.workspaceId,
+      input.datasetVersionId,
+      input.jobId,
+      input.querySpec,
+      input.objectKey,
+      input.rowCount,
+      input.contentHash,
+      input.engineVersion,
+    ]
+  );
+
+  const existing = await dbGetAnalyticsResultByJob(input.workspaceId, input.jobId);
+  if (!existing) throw new Error('RESULT_REGISTRATION_FAILED');
+  return existing;
+}
+

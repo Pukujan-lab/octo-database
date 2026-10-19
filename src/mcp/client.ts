@@ -263,6 +263,63 @@ export class OctoApi {
     return this.request('GET', `/api/ops/summary?workspaceId=${encodeURIComponent(input.workspaceId)}`);
   }
 
+  registerDataset(input: {
+    workspaceId: string;
+    dataset: string;
+    name?: string;
+    schema: Array<{ name: string; type: string }>;
+    provenance: Record<string, unknown>;
+    watermark?: string;
+    idempotencyKey?: string;
+    parts: Array<{ partition: string; dataBase64: string }>;
+  }): Promise<unknown> {
+    return this.request(
+      'POST',
+      `/api/workspaces/${encodeURIComponent(input.workspaceId)}/datasets`,
+      {
+        dataset: input.dataset,
+        format: 'parquet',
+        ...(input.name === undefined ? {} : { name: input.name }),
+        schema: input.schema,
+        provenance: input.provenance,
+        ...(input.watermark === undefined ? {} : { watermark: input.watermark }),
+        ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+        parts: input.parts,
+      }
+    );
+  }
+
+  submitAnalyticsQuery(input: {
+    workspaceId: string;
+    datasetVersionId: string;
+    querySpec: string;
+    idempotencyKey?: string;
+  }): Promise<unknown> {
+    return this.request(
+      'POST',
+      `/api/workspaces/${encodeURIComponent(input.workspaceId)}/analytics/queries`,
+      {
+        datasetVersionId: input.datasetVersionId,
+        querySpec: input.querySpec,
+        ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+      }
+    );
+  }
+
+  getAnalyticsQueryStatus(input: { workspaceId: string; jobId: string }): Promise<unknown> {
+    return this.request(
+      'GET',
+      `/api/workspaces/${encodeURIComponent(input.workspaceId)}/analytics/queries/${encodeURIComponent(input.jobId)}`
+    );
+  }
+
+  getAnalyticsResult(input: { workspaceId: string; resultId: string }): Promise<unknown> {
+    return this.request(
+      'GET',
+      `/api/workspaces/${encodeURIComponent(input.workspaceId)}/analytics/results/${encodeURIComponent(input.resultId)}`
+    );
+  }
+
   retryJob(input: { workspaceId: string; jobId: string }): Promise<unknown> {
     return this.request(
       'POST',

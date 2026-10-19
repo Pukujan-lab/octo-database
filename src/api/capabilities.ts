@@ -139,6 +139,38 @@ export const OCTO_CAPABILITIES: CapabilityDescriptor[] = [
     description: 'Drain one pass of the background job queue for an authorized workspace.',
   },
   {
+    action: 'datasets.register',
+    method: 'POST',
+    path: '/api/workspaces/<id>/datasets',
+    requiredScope: 'write',
+    description:
+      'Register an immutable Parquet dataset version: supply base64 parts, a declared schema, and provenance; the server validates the Parquet footers, assigns the next version, derives the object keys, and writes the bytes. A re-export is a new version, never a mutation.',
+  },
+  {
+    action: 'analytics.query',
+    method: 'POST',
+    path: '/api/workspaces/<id>/analytics/queries',
+    requiredScope: 'read',
+    description:
+      'Submit one named analytical query over a registered dataset version. The caller names a query spec, never SQL; the server builds the statement and enqueues an analytics_query job. Poll the job with analytics.query_status.',
+  },
+  {
+    action: 'analytics.query_status',
+    method: 'GET',
+    path: '/api/workspaces/<id>/analytics/queries/<jobId>',
+    requiredScope: 'read',
+    description:
+      'Read one analytics job\'s state, error code and summary, and -- once completed -- its result id and artifact metadata.',
+  },
+  {
+    action: 'analytics.result',
+    method: 'GET',
+    path: '/api/workspaces/<id>/analytics/results/<resultId>',
+    requiredScope: 'read',
+    description:
+      'Fetch a completed analytics result: its metadata plus a short-lived download URL for the derived Parquet artifact.',
+  },
+  {
     action: 'activity.list',
     method: 'GET',
     path: '/api/activity?workspaceId=<id>',
