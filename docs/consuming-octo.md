@@ -153,6 +153,123 @@ infrastructure credentials." Do not reuse it elsewhere and do not treat it as an
 control-plane token. If you would rather never hold it at all, use the SQL surface
 above — it needs no connection string.
 
+## Historical analytics — Parquet and DuckDB (Slice 7)
+
+Analytical questions ("how many jobs failed, by type and month") do not belong in the
+transactional workspace database. Octo answers them over **immutable Parquet dataset
+versions** with **DuckDB**, in-process in the existing job worker. There is no separate
+analytics service and nothing to deploy.
+
+Four rules define the surface:
+
+- **The caller never supplies SQL and never supplies an object key.** You name a dataset,
+  a query spec, and ids. The server builds the statement and derives every storage key
+  from the authenticated workspace.
+- **A registration is immutable.** A re-export is a new version (`v1`, `v2`, …); nothing
+  is mutated or overwritten.
+- **Query execution is a job.** Submission returns a job id; poll it, then fetch the
+  derived result artifact.
+- **Everything is workspace-fenced.** A dataset version, job, or result belonging to
+  another workspace answers `404`, not `403`.
+
+### Endpoints
+
+| Call | Method and path | Scope | What it does |
+| --- | --- | --- | --- |
+| `datasets.register` | `POST /api/workspaces/<id>/datasets` | write | Register one immutable Parquet dataset version. |
+| `analytics.query` | `POST /api/workspaces/<id>/analytics/queries` | read | Submit one named query over a version. |
+| `analytics.query_status` | `GET /api/workspaces/<id>/analytics/queries/<jobId>` | read | Read the job's state and, once completed, its result. |
+| `analytics.result` | `GET /api/workspaces/<id>/analytics/results/<resultId>` | read | Result metadata plus a short-lived download URL. |
+
+All four require **member** role in the workspace. The named key class `analytics` is
+read-only, so it can query but cannot register — registration needs a key with the
+`write` scope.
+
+### 1. Register a version
+
+```json
+POST /api/workspaces/<id>/datasets
+{
+  "dataset": "job-history",
+  "name": "Job history export",
+  "format": "parquet",
+  "schema": [
+    { "name": "job_type", "type": "TEXT" },
+    { "name": "state", "type": "TEXT" },
+    { "name": "created_at", "type": "TIMESTAMP" }
+  ],
+  "provenance": { "source": "octo.jobs", "exportedAt": "2026-10-19T00:00:00Z" },
+  "watermark": "2026-10-18T23:59:59Z",
+  "parts": [
+    { "partition": "2026-09-30", "dataBase64": "<parquet bytes>" }
+  ]
+}
+```
+
+`parts[].partition` is a real `YYYY-MM-DD` date; `dataBase64` is the Parquet file.
+The server inspects every footer, rejects a schema that differs from the declaration
+(`SCHEMA_MISMATCH`), sums the row counts, assigns the next version under a lock, and
+writes the bytes to server-derived keys. `dataset` is a lowercase slug (`[a-z0-9-]`)
+that stays stable across versions.
+
+Response: `201 { datasetVersion, created: true }` for a new version, `200 … created:
+false` when `idempotencyKey` matches an existing registration, `409
+DATASET_VERSION_CONFLICT` on a concurrent collision (retry).
+
+### 2. Submit a query
+
+```json
+POST /api/workspaces/<id>/analytics/queries
+{ "datasetVersionId": "<uuid>", "querySpec": "job-failures-by-type-month@1" }
+```
+
+Available spec — `job-failures-by-type-month@1`:
+
+- **Inputs:** `job_type TEXT`, `state TEXT`, `created_at TIMESTAMP`.
+- **Output:** `job_type`, `month` (UTC month start), `failure_count` (BIGINT).
+- **Meaning:** count failed jobs per job type per month, ordered by type then month.
+
+Response: `201 { job: { id, jobType: "analytics_query", state, idempotencyKey }, created }`.
+The default idempotency key is `analytics:<datasetVersionId>:<querySpec>`, so submitting
+the same query twice returns the same job; pass your own `idempotencyKey` to run it again.
+
+### 3. Poll, then fetch the result
+
+```
+GET /api/workspaces/<id>/analytics/queries/<jobId>
+→ { jobId, state, jobType, errorCode, errorSummary, resultId, result }
+```
+
+`state` moves `queued → running → completed | failed`. The worker drains the queue on its
+own interval; `POST /api/jobs/run?workspaceId=<id>` (write scope) runs one pass
+immediately. On failure, `errorCode` is one of `PARQUET_MISSING`, `PARQUET_CORRUPT`,
+`SCHEMA_MISMATCH`, `QUERY_TIMEOUT`, `QUERY_CANCELLED`, `RESULT_REGISTRATION_FAILED`,
+`ANALYTICS_NOT_CONFIGURED`, or `INVALID_PAYLOAD`.
+
+```
+GET /api/workspaces/<id>/analytics/results/<resultId>
+→ { result: { id, datasetVersionId, querySpec, objectKey, rowCount,
+              contentHash, engineVersion, createdAt },
+    downloadUrl, expiresInSeconds }
+```
+
+`downloadUrl` is a presigned R2 URL in production and the authenticated content route
+(`/api/workspaces/<id>/analytics/results/<resultId>/content`) on a local storage
+backend. The artifact is Parquet; read it with DuckDB, pandas, Polars, or pyarrow.
+`contentHash` is the SHA-256 of the bytes, so a re-run can be compared for determinism.
+
+### Through MCP
+
+`register_dataset`, `query_dataset`, `get_analytics_query_status`, `get_analytics_result`
+— same arguments as the HTTP calls, with the parts supplied as `{ partition, dataBase64 }`.
+
+### Availability
+
+If the DuckDB native module or the object store is unavailable, `/health` reports
+`analytics: { configured: false, … }` and the routes answer `503
+ANALYTICS_NOT_CONFIGURED`. The rest of Octo keeps working; analytics is an optional
+surface, not a boot dependency.
+
 ## The vault: three token families, and what each one can see
 
 Octo's vault holds the owner's real vendor credentials. Three different tokens touch
@@ -304,11 +421,18 @@ SQL surface, and an API key does **not** authenticate `/api/vault/open`.
 ## Discover it
 
 - `GET /api/capabilities` → `workspaces.create`, `workspaces.query`,
-  `workspaces.provision_database`
+  `workspaces.provision_database`, `datasets.register`, `analytics.query`,
+  `analytics.query_status`, `analytics.result`
+- Analytics: `POST /api/workspaces/<id>/datasets`,
+  `POST /api/workspaces/<id>/analytics/queries`,
+  `GET /api/workspaces/<id>/analytics/queries/<jobId>`,
+  `GET /api/workspaces/<id>/analytics/results/<resultId>`
 - Vault: `GET /api/vault/open`, `POST /api/vault/open/lease`,
   `POST /api/vault/lease/renew`, `GET /api/vault/lease/info`,
   `ANY /api/vault/relay/<routeKey>/…`
-- MCP tools `create_workspace`, `query_workspace_database`, `provision_database`
+- MCP tools `create_workspace`, `query_workspace_database`, `provision_database`,
+  `register_dataset`, `query_dataset`, `get_analytics_query_status`,
+  `get_analytics_result`
 - Octo README, "Slice 21"; `docs/self-hosting.md`
 
 ## Adopting an existing project that already runs its own datastore
@@ -348,6 +472,13 @@ with its own scoped role (pgvector-ready). Reach it either way:
   string and store it as a secret. A workspace that still lacks one — created before
   auto-provision, or while `OCTO_ADMIN_URL` was unset — gets it from
   `provision_database` | `POST /api/workspaces/<id>/database`, returned once.
+
+**Historical analytics lives in Octo too.** For analytical questions over large
+history, register immutable Parquet dataset versions and run a named query spec with
+DuckDB — do not add a warehouse or a second analytical database. MCP
+`register_dataset` → `query_dataset` → `get_analytics_query_status` →
+`get_analytics_result`; HTTP under `/api/workspaces/<id>/datasets` and
+`/api/workspaces/<id>/analytics/…`. You never supply SQL or object keys.
 
 Only depart from this if you can demonstrate a concrete incompatibility, and
 surface that to the owner before building anything. See Octo's

@@ -1,0 +1,117 @@
+/**
+ * The `analytics_query` job (Slice 7).
+ *
+ * One job = one named query over one immutable dataset version. The payload
+ * carries ids only; the catalog row is the authority for the object keys and
+ * schema, and every key is asserted against the job's workspace before it is
+ * read or written.
+ */
+
+import { createHash } from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+import { ObjectStore } from '../storage/object-store';
+import { analyticsEngineStatus, prepareJobDirectory, removeJobDirectory, runSpecOverParquetFiles } from './engine';
+import { assertWorkspaceKey, resultObjectKey } from './paths';
+import { carriesSpecInputs, getQuerySpec } from './specs';
+import type { DatasetVersionRecord } from '../types/analytics';
+
+export interface AnalyticsJobDeps {
+  store: ObjectStore;
+  loadVersion: (workspaceId: string, datasetVersionId: string) => Promise<DatasetVersionRecord | null>;
+  registerResult: (input: {
+    workspaceId: string;
+    datasetVersionId: string;
+    jobId: string;
+    resultId: string;
+    querySpec: string;
+    objectKey: string;
+    rowCount: number;
+    contentHash: string;
+    engineVersion: string;
+  }) => Promise<void>;
+}
+
+export type AnalyticsJobResult =
+  | { ok: true; detail: string }
+  | { ok: false; code: string; summary: string; retryable: boolean };
+
+function failure(code: string, summary: string, retryable = false): AnalyticsJobResult {
+  return { ok: false, code, summary, retryable };
+}
+
+export async function runAnalyticsJob(
+  job: { jobId: string; workspaceId: string; payload: Record<string, unknown> },
+  deps: AnalyticsJobDeps
+): Promise<AnalyticsJobResult> {
+  const datasetVersionId = job.payload['datasetVersionId'];
+  const querySpec = job.payload['querySpec'];
+  const resultId = job.payload['resultId'];
+  if (
+    typeof datasetVersionId !== 'string' ||
+    typeof querySpec !== 'string' ||
+    typeof resultId !== 'string'
+  ) {
+    return failure('INVALID_PAYLOAD', 'analytics job payload must carry datasetVersionId, querySpec, and resultId');
+  }
+
+  const spec = getQuerySpec(querySpec);
+  if (!spec) return failure('INVALID_PAYLOAD', `unknown query spec ${querySpec}`);
+
+  const version = await deps.loadVersion(job.workspaceId, datasetVersionId);
+  if (!version) {
+    return failure('DATASET_VERSION_NOT_FOUND', `dataset version ${datasetVersionId} is not in this workspace`);
+  }
+  if (!carriesSpecInputs(version.schema, spec)) {
+    return failure('SCHEMA_MISMATCH', `dataset version ${datasetVersionId} no longer carries the spec inputs`);
+  }
+
+  const engine = await analyticsEngineStatus();
+  if (!engine.configured) return failure('ANALYTICS_NOT_CONFIGURED', 'the analytics engine is not configured');
+
+  const dir = prepareJobDirectory(job.jobId);
+  try {
+    const files: string[] = [];
+    for (let index = 0; index < version.objectKeys.length; index += 1) {
+      const key = version.objectKeys[index]!;
+      assertWorkspaceKey(key, job.workspaceId);
+      const bytes = await deps.store.get(key);
+      if (!bytes) return failure('PARQUET_MISSING', `dataset part ${key} is missing`);
+      const file = path.join(dir, `part-${index}.parquet`);
+      fs.writeFileSync(file, bytes);
+      files.push(file);
+    }
+
+    const run = await runSpecOverParquetFiles({
+      spec,
+      files,
+      outFile: path.join(dir, 'result.parquet'),
+      spillDir: path.join(dir, 'spill'),
+    });
+    if (!run.ok) return run;
+
+    const objectKey = resultObjectKey(job.workspaceId, resultId);
+    assertWorkspaceKey(objectKey, job.workspaceId);
+    await deps.store.put(objectKey, run.bytes, 'application/vnd.apache.parquet');
+
+    const contentHash = createHash('sha256').update(run.bytes).digest('hex');
+    await deps.registerResult({
+      workspaceId: job.workspaceId,
+      datasetVersionId,
+      jobId: job.jobId,
+      resultId,
+      querySpec,
+      objectKey,
+      rowCount: run.rowCount,
+      contentHash,
+      engineVersion: run.engineVersion,
+    });
+
+    return {
+      ok: true,
+      detail: `${querySpec} over ${version.objectKeys.length} part(s) -> ${run.rowCount} row(s)`,
+    };
+  } finally {
+    removeJobDirectory(dir);
+  }
+}
