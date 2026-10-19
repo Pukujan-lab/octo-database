@@ -172,7 +172,8 @@ stored `secret` or `notes` value — the only way to spend a credential is a wor
 key on a relay route, where Octo injects it server-side.
 
 That is what makes one grant safe to hand an agent: it can discover all of the
-owner's keys, and it still cannot read one.
+owner's keys, and it still cannot read one. The owner-only item, route, and grant
+endpoints answer `403` to a grant — that is a scope limit, not an expired session.
 
 ## Using a vendor credential without holding it
 
@@ -190,10 +191,25 @@ curl -s -X POST https://octo.example/api/vault/open/lease \
   -d '{"label": "Fish Audio", "expiresInDays": 15}'
 ```
 
-`label` must match a stored item in the grant's cabinet; `itemId` works too. The
-item must have a route, or a `url` of its own — Octo turns an item url into a bearer
-route the first time it is minted. An item with neither answers
-`400 ROUTE_REQUIRED`.
+`label` must match a stored item in the grant's cabinet; `itemId` works too. Octo
+needs a vendor base URL before it can relay the key. It uses, in order: an explicit
+route on the item, a `baseUrl` passed at lease time, or the item's own `url` (turned
+into a bearer route the first time it is minted). An imported token with no url of
+its own therefore works when the caller names the vendor:
+
+```bash
+curl -s -X POST https://octo.example/api/vault/open/lease \
+  -H "Authorization: Bearer $OCTO_VAULT_GRANT" \
+  -H 'Content-Type: application/json' \
+  -d '{"itemId": "…", "baseUrl": "https://api.vendor.example/v1", "authScheme": "bearer"}'
+```
+
+`authScheme` defaults to `bearer`; `x-api-key` and `query` also need `authHeader`,
+`basic` can take `basicUsername`, and `body_json` and `path` need `bodyField`. The
+derived route is saved on the item, so the owner sees it in the dashboard and later
+leases reuse it. An item with no route, no `baseUrl`, and no `url` answers
+`400 ROUTE_REQUIRED` with `code`, `itemId`, and `requires: "baseUrl"` so a caller can
+tell the missing prerequisite apart from a bad label or an expired grant.
 
 The response carries the working key and the relay route(s) for that item:
 
