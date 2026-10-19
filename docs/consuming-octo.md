@@ -242,9 +242,10 @@ GET /api/workspaces/<id>/analytics/queries/<jobId>
 
 `state` moves `queued → running → completed | failed`. The worker drains the queue on its
 own interval; `POST /api/jobs/run?workspaceId=<id>` (write scope) runs one pass
-immediately. On failure, `errorCode` is one of `PARQUET_MISSING`, `PARQUET_CORRUPT`,
-`SCHEMA_MISMATCH`, `QUERY_TIMEOUT`, `QUERY_CANCELLED`, `RESULT_REGISTRATION_FAILED`,
-`ANALYTICS_NOT_CONFIGURED`, or `INVALID_PAYLOAD`.
+immediately. On failure, `errorCode` is one of `DATASET_VERSION_NOT_FOUND`,
+`PARQUET_MISSING`, `PARQUET_CORRUPT`, `SCHEMA_MISMATCH`, `QUERY_TIMEOUT`,
+`QUERY_CANCELLED`, `RESULT_REGISTRATION_FAILED`, `ANALYTICS_NOT_CONFIGURED`, or
+`INVALID_PAYLOAD`.
 
 ```
 GET /api/workspaces/<id>/analytics/results/<resultId>
