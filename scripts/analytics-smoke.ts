@@ -12,7 +12,9 @@
  *   4. the named query is submitted and one queue pass is drained;
  *   5. the job completes and the derived artifact downloads with the known
  *      aggregate and a matching content hash;
- *   6. the smoke workspace is deleted (test-data hygiene).
+ *   6. the deployed MCP surface advertises the four analytics tools and answers
+ *      a status call with the same key;
+ *   7. the smoke workspace is deleted (test-data hygiene).
  *
  * Env:
  *   OCTO_SMOKE_BASE_URL  default https://octodb.design-bakery.com
@@ -161,6 +163,60 @@ async function main(): Promise<void> {
     );
     const rows = await readResultRows(bytes);
     check('the aggregate is the known one', JSON.stringify(rows) === JSON.stringify(EXPECTED_AGGREGATE), JSON.stringify(rows));
+
+    console.log('the MCP surface advertises and answers the analytics tools');
+    const mcpHeaders = {
+      Authorization: `Bearer ${rawSecret}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+    };
+    const initialize = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: mcpHeaders,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'analytics-smoke', version: '0' },
+        },
+      }),
+    });
+    check('MCP initialize succeeds', initialize.status === 200, String(initialize.status));
+
+    const list = await json<{ result?: { tools?: Array<{ name: string }> } }>(
+      await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: mcpHeaders,
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+      })
+    );
+    const toolNames = new Set((list.result?.tools ?? []).map((tool) => tool.name));
+    const wantedTools = ['register_dataset', 'query_dataset', 'get_analytics_query_status', 'get_analytics_result'];
+    const missingTools = wantedTools.filter((name) => !toolNames.has(name));
+    check('MCP advertises the four analytics tools', missingTools.length === 0, JSON.stringify(missingTools));
+
+    const mcpStatus = await json<{ result?: { content?: Array<{ text: string }> }; error?: unknown }>(
+      await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: mcpHeaders,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 3,
+          method: 'tools/call',
+          params: {
+            name: 'get_analytics_query_status',
+            arguments: { workspaceId, jobId },
+          },
+        }),
+      })
+    );
+    const mcpJob = mcpStatus.result?.content?.[0]?.text
+      ? (JSON.parse(mcpStatus.result.content[0].text) as { state?: string; resultId?: string })
+      : null;
+    check('MCP answers the analytics job status', mcpJob?.state === 'completed' && mcpJob.resultId === jobStatus.resultId, JSON.stringify(mcpStatus));
   } finally {
     console.log('delete the disposable workspace');
     const deleted = await fetch(`${baseUrl}/api/workspaces/${workspaceId}`, {
