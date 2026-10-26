@@ -24,13 +24,6 @@ except ImportError as exc:  # pragma: no cover - exercised by CLI error path
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_IS_ADOPTER = not (SOURCE_ROOT / "ontology/default.json").is_file() and (SOURCE_ROOT / ".oio/ontology/default.json").is_file()
 DATA_ROOT = SOURCE_ROOT / ".oio" if SOURCE_IS_ADOPTER else SOURCE_ROOT
-try:
-    OIO_VERSION = json.loads((SOURCE_ROOT / "stack-manifest.json").read_text(encoding="utf-8"))["pins"]["observational-issue-ops"]["version"]
-except (OSError, KeyError, json.JSONDecodeError):
-    try:
-        OIO_VERSION = json.loads((SOURCE_ROOT / ".oio/install-manifest.json").read_text(encoding="utf-8"))["oio_version"]
-    except (OSError, KeyError, json.JSONDecodeError):
-        OIO_VERSION = "0.1.0"
 MANIFEST_REL = ".oio/install-manifest.json"
 JOURNAL_REL = ".oio/.installer-transaction.json"
 AGENTS_START = "<!-- oio:issue-log-guidance:start -->"
@@ -55,6 +48,38 @@ RECOVERY_ALLOWED = set(PACKAGE_FILES) | {"AGENTS.md", ".oio/ontology/project.jso
 
 class InstallError(Exception):
     """A safe, actionable install refusal."""
+
+
+def _detect_version(source_root: Path = SOURCE_ROOT) -> str:
+    """Report the package version without a hard-coded fallback.
+
+    Precedence: the stack-manifest pin, the installed manifest, then the
+    checked-in ``VERSION`` file. A literal in this script once said 0.2.0
+    while the package moved on, so the last resort is a refusal with an
+    actionable message rather than a number nobody updates.
+    """
+    try:
+        pinned = json.loads((source_root / "stack-manifest.json").read_text(encoding="utf-8"))["pins"]["observational-issue-ops"]["version"]
+        if pinned:
+            return str(pinned)
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
+        pass
+    try:
+        installed = json.loads((source_root / ".oio/install-manifest.json").read_text(encoding="utf-8"))["oio_version"]
+        if installed:
+            return str(installed)
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
+        pass
+    try:
+        version = (source_root / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        version = ""
+    if version:
+        return version
+    raise InstallError("cannot determine the OIO package version: no stack-manifest.json pin, install manifest, or VERSION file was found")
+
+
+OIO_VERSION = _detect_version()
 
 
 def _sha256(data: bytes) -> str:

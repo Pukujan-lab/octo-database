@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1.0",
   "project": "Octo single-owner bootstrap",
-  "recorded_at": "2026-10-02T21:23:00Z",
+  "recorded_at": "2026-10-26T00:00:00Z",
   "notes": "ACS hot-loader adopter state. Live join/continue order wins. Previous bootstrap lease expired; current orchestrator claimed the vacant seat under FIFO rules. FULL PCM + FULL CGM 0.5.12 required; release-train sync applied.",
   "role_fill": {
     "mode": "join_continue_order",
@@ -74,13 +74,13 @@
   "pins": {
     "acs": {
       "repo": "https://github.com/Pukujan/agent-custom-setup",
-      "revision": "3df982adc008b9caa4b3a9991f77486393c9a30b",
+      "revision": "aea4f1b71ea1a5e74c1ca8413053951e29be40fb",
       "module": "modules/coordination/multi-agent-hotload/v0.1.0",
       "version": "0.1.0"
     },
     "pcm": {
       "repo": "https://github.com/Pukujan/project-continuity-modules",
-      "revision": "85e6aa7a889b57aeef270213c37258194717e358",
+      "revision": "70dc17dcf96b99b9bf9308a774fdcfa0b70d3f6b",
       "cli_version": "0.7.0",
       "protocol": "0.1.0-draft",
       "role": "full_stack",
@@ -97,7 +97,7 @@
     },
     "cgm": {
       "repo": "https://github.com/Pukujan/content-generation-modules",
-      "revision": "5c8c5f167098d04cf96fb1fe449880001a1edd14",
+      "revision": "100f3c3ff1f612f76ef11f713a7466778cd8aa00",
       "version": "0.5.12",
       "role": "full_stack",
       "modules": [
@@ -142,7 +142,7 @@
     },
     "oio": {
       "repo": "https://github.com/Pukujan/observational-issue-ops",
-      "revision": "402a46ec9544fddacb8cc366b07c7fc44b096b69",
+      "revision": "305adc5d09920d28e603a1b317108637cc30a624",
       "version": "0.1.0"
     }
   },

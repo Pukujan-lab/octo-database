@@ -1,0 +1,27 @@
+name: OIO close on merge
+
+# Closes the observational/operational issue logs named by native closing
+# verbs (`Closes/Fixes/Resolves #n`) in a merged pull request's body, adds
+# `status:resolved`, rewrites the log's Lifecycle Status, and posts a
+# marker-guarded comment. `Refs #n` closes nothing. Reusable workflow from
+# OIO, pinned to the certified release-train commit (see stack-manifest.json
+# / HANDOFF.md); bump the ref only with a deliberate train upgrade.
+
+on:
+  pull_request:
+    branches: [main, production]
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  close:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    uses: Pukujan/observational-issue-ops/.github/workflows/close-on-merge.yml@305adc5d09920d28e603a1b317108637cc30a624
+    with:
+      oio_ref: 305adc5d09920d28e603a1b317108637cc30a624
