@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Run the Cloudflare Tunnel connector for Octo on this host.
 #
-# This joins the existing tunnel that already serves octodb.design-bakery.com:
-# its ingress rule maps that hostname to `http://octo-web:80`, so attaching a
-# connector to the same network the edge overlay uses (study-os_edge, where
-# octo-web is aliased) is all that is needed -- no DNS or ingress change.
+# Octo has its own tunnel (`octo-mac`) whose only ingress rule maps
+# octodb.design-bakery.com to `http://octo-web:80`. It must not share a tunnel
+# with another host: a shared tunnel balances requests across every connector,
+# and the two hosts hold different session and Google OAuth secrets, so a
+# sign-in handled by the other host either fails the token exchange or returns
+# a session the Mac cannot verify. Attaching the connector to the network the
+# edge overlay uses (study-os_edge, where octo-web is aliased) is all the
+# routing needed.
 #
 # The connector dials outbound, so no inbound port is opened and the host needs
 # no public address.

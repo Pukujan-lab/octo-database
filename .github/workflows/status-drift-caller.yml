@@ -1,0 +1,21 @@
+name: OIO lifecycle drift audit
+
+# Report-only audit: fails when an issue's status:* label contradicts GitHub's
+# open/closed state (a closed log must carry status:resolved/superseded/
+# obsolete/wontfix; an open log must carry status:open). Never edits issues.
+# Reusable workflow from OIO, pinned to the certified release-train commit.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  drift:
+    uses: Pukujan/observational-issue-ops/.github/workflows/oio-status-drift.yml@305adc5d09920d28e603a1b317108637cc30a624
+    with:
+      oio_ref: 305adc5d09920d28e603a1b317108637cc30a624
