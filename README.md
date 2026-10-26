@@ -1,6 +1,9 @@
 # Octo
 
-Octo is a self-hosted control plane for people who want **one place to reach their workspaces, files, applications, and agents** without rebuilding login and storage plumbing for every project.
+Octo is a self-hosted workspace data platform. One server gives every project,
+person, and agent a workspace with its own database, files, analytics, retrieval,
+graph, and credentials — reached through one capability API instead of rebuilt
+plumbing.
 
 ![Octo Control Plane](docs/assets/octo-hero-banner.png)
 
@@ -8,71 +11,84 @@ Octo is a self-hosted control plane for people who want **one place to reach the
 
 ## Why this exists
 
-Personal files, family media, work projects, research systems, and AI agents often end up scattered across local disks and unrelated services. Octo gives them one durable identity and workspace boundary while keeping the underlying infrastructure replaceable.
+Personal files, family media, work projects, research systems, and AI agents end
+up scattered across local disks and unrelated services. Octo gives them one
+durable identity and workspace boundary while keeping the underlying
+infrastructure replaceable.
 
-- **PostgreSQL / Supabase**: Canonical metadata, workspace membership, and fail-closed Row-Level Security (RLS).
-- **Cloudflare R2**: Fast, low-cost active object storage for hot files.
-- **Google Drive**: Scalable personal cold storage (utilizing your Google One / AI Pro 5TB pooled quota) for archived media.
-- **One Platform API & Scoped Agent Keys**: Users and autonomous coding agents interact with logical file IDs and workspace machine tokens. Master database and cloud credentials stay on the server. A workspace's provisioned database can be reached two ways: its own connection string, returned once to the caller that created it, or the SQL surface (`POST /api/workspaces/<id>/query`), where an API key alone runs SQL with no connection string — either way it reaches no Octo control-plane data.
+- **PostgreSQL + pgvector** — canonical metadata, workspace membership, optional
+  vector search, and fail-closed Row-Level Security.
+- **A database per workspace** — provisioned at creation and owned by its own
+  scoped role, reachable with an Octo key and no connection string.
+- **Cloudflare R2** — hot object storage, plus a public bucket for published files.
+- **Google Drive** — cold archival tier for files that leave active storage.
+- **FalkorDB** — an optional, rebuildable graph projection over the epistemic ledger.
+- **DuckDB + Parquet** — immutable dataset versions and named analytical queries.
+- **One Platform API and scoped agent keys** — users and autonomous agents work
+  with logical IDs and workspace machine tokens. Master database and cloud
+  credentials stay on the server.
 
-> **Building a project that Octo serves?** Octo is that project's data layer. Do not
-> stand up a database of your own — provision the workspace database through Octo, then
-> run SQL with your Octo API key or connect with an ordinary Postgres client. A human
-> mints the project's workspace-scoped key once (creating a workspace and minting a key
-> are human-stamped; an API key can never do either). See
-> **[docs/consuming-octo.md](docs/consuming-octo.md)**.
-
----
-
-## Shipped slices & live architecture
-
-```
-Google Login & RLS ──► Full-Stack Server & UI ──► Active R2 Storage ──► Drive Archival ──► Agent API Keys
-    (Slice 1 - Merged)     (Full-Stack - Merged)     (Slice 2 - Merged)   (Slice 5 - Verified)   (Slice 7 - Merged)
-```
-
-| Slice / Component | Scope & Capabilities | Status |
-|---|---|---|
-| **Slice 1 (#3)** | Google OAuth login, Octo principals, workspaces, PostgreSQL RLS, control dashboard | **Merged** (`PR #20`) |
-| **Slice 2 (#4)** | Canonical `octo.files` catalog, signed URL generation, Cloudflare R2 active storage | **Merged** (`PR #21`) |
-| **Slice 7 (#9)** | Scoped machine identities, workspace API keys (`OCTO_API_KEY`), and REST API gateway | **Merged** (`PR #21`) |
-| **Full-Stack Runtime** | Node server (`src/server/`), Vite frontend (`src/main.ts`), live DB & R2 integration | **Merged** (`PR #22`) |
-| **QA Vision Pipeline** | Playwright E2E testing with Alibaba Qwen 3.8 Flash multimodal vision model verification | **Merged** (`PR #23`) |
-| **Provider Runtime (#16)** | Provider configuration for R2 & Google Drive OAuth without secret leakage in Git | **Merged** (`PR #19`) |
-| **Slice 5 (#7)** | Google Drive 5TB cold storage archival transition and on-demand restore | **Verified Live** |
-| **Slice 20 (#153)** | A real, independently connectable PostgreSQL database per workspace, owned by its own scoped role | **Merged** (`PR #155`) |
-| **Slice 21** | Run SQL against a workspace's own provisioned database with just an Octo API key — no connection string, host, or port | **Merged** |
-| **Slice 3 (#5)** | Workspace image/video gallery with thumbnails and album browsing | *Next up* |
+> **Building a project that Octo serves?** Octo is that project's data layer. Do
+> not stand up a database of your own — provision the workspace database through
+> Octo, then run SQL with your Octo API key or connect with an ordinary Postgres
+> client. A human mints the project's workspace-scoped key once (creating a
+> workspace and minting a key are human-stamped; an API key can never do either).
+> See **[docs/consuming-octo.md](docs/consuming-octo.md)**.
 
 ---
 
-## Live multi-tier verification
+## What ships today
 
-Octo includes live verification pipelines testing isolated workspaces across both storage tiers:
+| Capability | What it does |
+|---|---|
+| **Workspaces and identity** | Google OAuth or guest sign-in, principals, roles (`member`/`operator`/`admin`), per-workspace membership, RLS-backed isolation |
+| **Provisioned databases** | Each workspace gets its own PostgreSQL database and scoped role at creation; reach it by connection string (returned once) or the SQL surface |
+| **SQL surface** | `POST /api/workspaces/<id>/query` runs SQL with just an API key — no host, port, or connection string |
+| **Files** | Upload, list, download, delete, thumbnails, and short-lived signed URLs, backed by R2 |
+| **Publishing** | Copy one file to the public bucket and get a stable HTTPS URL; unpublish reverses it |
+| **Archival** | Move files to Google Drive cold storage and restore them on demand |
+| **Gallery and shares** | Image and video gallery with thumbnails, plus scoped public share links |
+| **Analytics** | Register immutable Parquet dataset versions, run named query specs through DuckDB, fetch result artifacts |
+| **Retrieval** | Ingest documents, chunk and embed them locally, then query by similarity |
+| **Epistemic ledger** | Bitemporal claims, beliefs, and evidence with as-of queries; a correction is a new row, never a rewrite |
+| **Graph** | Rebuildable FalkorDB projection of the ledger, with health reporting and read-only Cypher queries |
+| **Jobs and operations** | Background job queue plus classified operational failure events and summaries |
+| **Credential vault** | Store credentials, mint leases, and relay working keys to vendor APIs without handing plaintext to an agent |
+| **API keys** | Account-wide or workspace-scoped keys over four real scopes, named key classes, MFA step-up, and a human confirmation gate on creation |
+| **MCP server** | 29 tools over Streamable HTTP at `/mcp`, with OAuth 2.1 authorization for hosted clients |
+| **Control dashboard** | Overview, files, gallery, analytics, operations, access, and vault views, with switchable design systems |
 
-```bash
-# Verify configured credentials and live quotas (R2 buckets + Google Drive 5TB)
-python scripts/verify_storage_credentials.py
-
-# Run live multi-workspace upload, archive, and restore cycle
-python scripts/verify_live_guest_storage.py
-```
-
-### Verified workflow:
-1. **Multi-Workspace Ingestion**: Guest accounts authenticate and upload active files to Cloudflare R2 via the platform API.
-2. **SHA-256 Integrity**: Downloads confirm bit-for-bit integrity against PostgreSQL metadata.
-3. **Archival Transition**: Active file transitions to Google Drive cold storage; verified in Google Drive; active R2 copy pruned.
-4. **On-Demand Restore**: Archived object restored from Google Drive back to Cloudflare R2 with exact byte match.
-5. **Fail-Closed Isolation**: Cross-workspace path and database access are strictly denied.
+Capability discovery is live: `GET /api/capabilities` returns the actions,
+methods, paths, and required scopes available to the calling credential, minus
+anything its provider configuration cannot serve.
 
 ---
 
-## Architecture & boundaries
+## Surfaces
 
-- **Single owner, multiple isolated workspaces**: Each family member, collaborator, or agent operates in their own workspace boundary.
-- **Zero master credentials in browsers or agents**: Browsers and client SDKs only receive short-lived signed URLs, server-proxied streams, or scoped workspace machine tokens.
-- **Provider-level encryption**: Files are encrypted in transit via TLS 1.3 and at rest via AES-256 by Cloudflare and Google.
-- **No unnecessary abstractions**: Uses platform defaults from Supabase, Cloudflare, and Google without adding speculative infrastructure or custom secret brokers.
+| Surface | How to reach it |
+|---|---|
+| **HTTP API** | `https://<host>/api/...` with `Authorization: Bearer octo_live_...` |
+| **MCP** | `POST /mcp` (Streamable HTTP); bearer key or OAuth access token |
+| **SQL** | `POST /api/workspaces/<id>/query`, or a direct Postgres connection from the provisioning call |
+| **Web UI** | The dashboard served at the site root |
+
+The API and the MCP server expose the same capabilities; the UI is a client of
+the API.
+
+---
+
+## Deploying and running
+
+Octo runs as Docker Compose: a Caddy frontend, a Node API, PostgreSQL with
+pgvector, and FalkorDB, with an optional Cloudflare Tunnel connector. The live
+instance runs on macOS under launchd agents that poll `origin/production` and
+deploy on change, with scheduled database and file backups.
+
+- Deployment and promotion runbook: **[docs/self-hosting.md](docs/self-hosting.md)**
+  (the Compose topology and promotion flow; host-specific scripts live in `deploy/mac/`)
+- Architecture and enforced repository shape: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
+- Consuming Octo from a project: **[docs/consuming-octo.md](docs/consuming-octo.md)**
 
 ---
 
@@ -95,7 +111,7 @@ npm run backup -- --commit    # upload changed files
 Point a workspace at this repository to collect operational snapshots — git
 state, repository shape, test inventory, and live server health — as JSON files
 you can browse and analyze alongside other workspace data. Read-only against the
-repo and server; the only write is the snapshot upload.
+repository and the server; the only write is the snapshot upload.
 
 ```bash
 OCTO_OPS_TOKEN=octo_live_ws_... OCTO_OPS_WORKSPACE=<uuid> npm run capture-ops
@@ -104,24 +120,42 @@ OCTO_OPS_TOKEN=... OCTO_OPS_WORKSPACE=... npm run capture-ops -- --dry-run
 
 ---
 
-## Local development & gates
+## Local development and gates
+
+The root and the frontend app have separate dependency trees.
 
 ```bash
-# Install dependencies
 npm install
+npm ci --prefix frontend
 
-# Run TypeScript type check
-npm run typecheck
+npm run server            # API on :3001
+npm run dev               # frontend on :3000, proxying the API
 
-# Run unit and integration tests
-npm test
+npm run typecheck         # TypeScript
+npm run lint:imports      # dependency-cruiser layer rule
+npm test                  # Vitest unit and integration tests
 
-# Run contract integrity and schema tests
 python scripts/check_json.py
 python -m unittest discover -s tests -v
-
-# Run linter and static typing
 ruff check scripts tests
 ruff format --check scripts tests
 mypy
+
+npx playwright test       # browser suite; needs a running stack
 ```
+
+CI runs all of the above as the single required `gates` check, along with the
+live isolation, provisioning, SQL-surface, and analytics verifiers in `scripts/`.
+
+---
+
+## Repository shape
+
+Octo is a modular monolith organized by feature. `src/routes/<family>.ts` owns one
+HTTP route family; `src/server/` holds the composition root, shared request
+plumbing, and the SQL stores; `src/<domain>/` holds slice services; `src/lib/` and
+`src/types/` are leaves.
+
+The layer rule is machine-checked, not advisory: `npm run lint:imports` fails CI
+on an import that crosses a boundary the wrong way. The full tree and rationale
+are in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
