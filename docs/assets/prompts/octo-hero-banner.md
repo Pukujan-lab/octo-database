@@ -1,17 +1,17 @@
-# Octo Database — prompt record
+# Octo — prompt record
 
-**Record type:** reconstructed prompt intent; editorial narrative hero banner.
+**Record type:** generated editorial hero banner.
 
-**Role and audience:** wide hero image for users and developers managing multiple isolated workspaces with active cloud and archival storage.
+**Role and audience:** wide hero image for the repository README, aimed at developers and operators deciding whether Octo is the data layer for their project.
 
-**Single idea:** a central personal control plane connecting workspaces, active Cloudflare R2 object vaults, and personal cold archival storage tiers.
+**Single idea:** one hexagonal core connecting six isolated workspace planes.
 
-**Prompt intent:** Create an editorial illustration with warm cream paper, deep navy typography, muted slate blue, and restrained gold accents. A central control dashboard connects distinct workspaces, an active cloud object vault, and an archival storage tier. Exact title 'Octo Database' and exact subtitle 'Multi-workspace personal control plane with active and archival storage' in clean typography. No fake metrics, dense UI, decorative pseudo-text, or suggestion that the software has already automated this whole scene.
+**Prompt intent:** Create an editorial technical illustration on a deep navy-black ground with warm off-white linework and one restrained amber accent. A hexagonal core with a luminous orb inside a fine ring sits at the centre, surrounded by six isometric stacked planes at different depths — each a discrete workspace slab — connected to the core by hairline paths. A dotted grid recedes into the dark ground. Exact title 'Octo' set large and bold in a clean geometric sans, with exact subtitle 'Your project's data layer.' smaller and lighter beneath it, both warm off-white and left-aligned in the left third. No other text, no logos, no UI panels, no fake metrics, no humanoid robots, no floating padlocks, no lens flares.
 
-**Placement and crop:** README lead visual after the one-sentence project description. Use 1264 × 848 as delivered. Keep the full title panel in wide layouts; on narrow screens stack at full width without cutting off the title.
+**Placement and crop:** README lead visual after the one-sentence project description. Delivered art is 1659 × 933; the committed banner is 1264 × 848 with the art fitted whole and padded vertically on its own ground colour, so no workspace plane is cut off and the left third stays clear for the title block.
 
-**Alt text:** Octo control plane unifying isolated workspaces, active cloud object storage, and cold archival tiers.
+**Alt text:** Octo — isometric workspace planes connected to a central hexagonal core.
 
-**Review decision:** Accepted. The title and subtitle are legible, the composition communicates workspace separation and storage lifecycle cleanly.
+**Review decision:** Accepted. The composition reads as one control point unifying separate workspaces, the title and subtitle are legible against the quiet left third, and the frame carries no fabricated counts, vendor marks, or UI chrome.
 
-**Asset SHA-256:** b528cf5c3b8c7339d2b251d38af993aaa1c5d4355be4ef4bc11f8276924db169.
+**Asset SHA-256:** befe68b0b04463bf43db6f535bb8f172a545db637987758bcdd2d03d1b6e91b0.

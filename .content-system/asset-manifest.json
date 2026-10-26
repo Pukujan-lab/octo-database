@@ -8,17 +8,17 @@
       "orientation": "wide",
       "dimensions": "1264x848",
       "text_policy": "Exact title and subtitle only; no extra labels or fabricated metrics.",
-      "exact_title": "Octo Database",
-      "exact_subtitle": "Multi-workspace personal control plane with active and archival storage",
-      "prompt_recipe": "Editorial illustration with warm cream paper, deep navy typography, muted slate blue, and restrained gold accents. A central control dashboard connects distinct workspaces, an active cloud object vault, and an archival storage tier. Exact title 'Octo Database' and exact subtitle 'Multi-workspace personal control plane with active and archival storage' in clean typography. No fake metrics, dense UI, decorative pseudo-text, or suggestion that the software has already automated this whole scene.",
-      "alt_text": "Octo control plane unifying isolated workspaces, active cloud object storage, and cold archival tiers.",
+      "exact_title": "Octo",
+      "exact_subtitle": "Your project's data layer.",
+      "prompt_recipe": "Editorial technical illustration on a deep navy-black ground with warm off-white linework and one restrained amber accent. A hexagonal core with a luminous orb inside a fine ring sits at the centre, surrounded by six isometric stacked planes at different depths, each a discrete workspace slab, connected by hairline paths. A dotted grid recedes into the dark ground. Exact title 'Octo' set large and bold in a clean geometric sans, with exact subtitle 'Your project's data layer.' smaller and lighter beneath it, both warm off-white and left-aligned in the left third. No other text, no logos, no UI panels, no fake metrics, no humanoid robots, no floating padlocks, no lens flares.",
+      "alt_text": "Octo - isometric workspace planes connected to a central hexagonal core.",
       "usage": "README lead visual; placed after the repository headline and description.",
-      "crop_behavior": "Full wide frame without cropping typography or core elements.",
+      "crop_behavior": "Full wide frame; keep the title block and the hexagonal core uncropped.",
       "rejection_conditions": "Reject if title is misspelled, layout is cluttered, or text includes fabricated metrics.",
       "review_decision": "accepted after visual review at repository image size",
       "provider": "built-in image_gen",
       "prompt_record": "docs/assets/prompts/octo-hero-banner.md",
-      "hash": "b528cf5c3b8c7339d2b251d38af993aaa1c5d4355be4ef4bc11f8276924db169"
+      "hash": "befe68b0b04463bf43db6f535bb8f172a545db637987758bcdd2d03d1b6e91b0"
     },
     {
       "path": "docs/assets/workspace-dashboard.svg",
