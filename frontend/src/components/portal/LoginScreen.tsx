@@ -1,13 +1,12 @@
 import { Hexagon } from "lucide-react";
-import { SignInCard } from "./SignInCard";
 import { LandingHero } from "@/components/landing/LandingHero";
-import { StepTrace } from "@/components/landing/StepTrace";
-import { CapabilityGrid } from "@/components/landing/CapabilityGrid";
-import { AgentsBand } from "@/components/landing/AgentsBand";
+import { ConstellationField } from "@/components/landing/ConstellationField";
+import { Manifesto } from "@/components/landing/Manifesto";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import type { Health } from "@/lib/types";
 
-/** The signed-out screen: marketing page first, sign-in card at the bottom. */
+/** The signed-out screen: intro with the sign-in card, the constellation band,
+ *  then the narrative close. */
 export function LoginScreen({
   health,
   healthPending,
@@ -40,28 +39,16 @@ export function LoginScreen({
       </header>
 
       <main>
-        <LandingHero />
-        <StepTrace />
-        <CapabilityGrid />
-        <AgentsBand />
-
-        <section id="sign-in" className="scroll-mt-6">
-          <div className="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 lg:py-24">
-            <div className="mx-auto w-full max-w-lg">
-              <h2 className="eyebrow">Start a session</h2>
-              <div className="mt-4">
-                <SignInCard
-                  health={health}
-                  healthPending={healthPending}
-                  notice={notice}
-                  signingIn={signingIn}
-                  onGuest={onGuest}
-                  isDark={isDark}
-                />
-              </div>
-            </div>
-          </div>
-        </section>
+        <LandingHero
+          health={health}
+          healthPending={healthPending}
+          notice={notice}
+          signingIn={signingIn}
+          onGuest={onGuest}
+          isDark={isDark}
+        />
+        <ConstellationField />
+        <Manifesto />
       </main>
 
       <LandingFooter health={health} />
