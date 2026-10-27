@@ -14,6 +14,10 @@
  *         results instead of erroring or returning nothing.
  *   MR-3  The corpus stays scoped. Neither arm reaches another workspace's chunks.
  *   MR-4  `limit` bounds the fused result.
+ *   MR-5  An identifier embedded in a URL path is still recoverable. The parser
+ *         keeps `huggingface.co/org/ESM_nguha__legalbench_citation_prediction_open`
+ *         as one token, so without separator normalization the query's separate
+ *         words never intersect it. This is the shape that failed on production.
  */
 
 import { expect, test } from '@playwright/test';
@@ -201,5 +205,28 @@ test.describe('hybrid retrieval', () => {
     }
     expect((await hybrid(ws, 'ZQX-7741-OMEGA', 1, 10)).length).toBe(4);
     expect((await hybrid(ws, 'ZQX-7741-OMEGA', 1, 2)).length).toBe(2);
+  });
+
+  test('MR-5: an identifier embedded in a URL path is still recoverable', async () => {
+    const ws = await seedWorkspace();
+    // The identifier only appears inside a URL path, so the raw parser would keep
+    // the whole path as one lexeme and the query's words would never match it.
+    const embedded = await seedChunk(
+      ws,
+      `Dataset ${randomUUID()}`,
+      'Download from https://huggingface.co/davidschulte/ESM_nguha__legalbench_citation_prediction_open',
+      1
+    );
+    const generic = await seedChunk(
+      ws,
+      `Notes ${randomUUID()}`,
+      'Benchmark results are summarized in the appendix for each release.',
+      2
+    );
+
+    const fused = await hybrid(ws, 'ESM_nguha__legalbench_citation_prediction', 2);
+    expect(fused[0]!.chunkId).toBe(embedded.chunkId);
+    expect(fused[0]!.lexicalScore).not.toBeNull();
+    expect(fused.map((r) => r.chunkId)).toContain(generic.chunkId);
   });
 });
