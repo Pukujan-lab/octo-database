@@ -61,7 +61,7 @@ export function Manifesto() {
 
           <Beat eyebrow="The 2:00 AM" pull="One hallucinated mutation is all it takes.">
             <p>
-              A pager at 2:00 AM. A cross-tenant read. A table that no longer exists. Your
+              A pager at 2:00 AM, a cross-tenant read, a table that no longer exists. Your
               automation is only ever as safe as the surface you let it touch.
             </p>
           </Beat>
