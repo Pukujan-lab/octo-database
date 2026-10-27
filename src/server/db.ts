@@ -1548,19 +1548,21 @@ export async function dbReplaceChunksAndEmbeddings(
   return chunks.length;
 }
 
-/** Workspace-scoped semantic retrieval. The filter is applied in SQL. */
-export async function dbMatchChunks(
+/** Workspace-scoped hybrid retrieval: lexical and vector arms fused with RRF. */
+export async function dbMatchChunksHybrid(
   workspaceId: string,
+  queryText: string,
   queryVector: number[],
-  matchCount = 10,
-  minSimilarity = 0
+  matchCount = 10
 ): Promise<
   Array<{
     chunkId: string;
     documentVersionId: string;
     content: string;
     chunkIndex: number;
-    similarity: number;
+    similarity: number | null;
+    lexicalScore: number | null;
+    score: number;
     model: string;
     modelVersion: string;
     chunker: string;
@@ -1569,9 +1571,10 @@ export async function dbMatchChunks(
   const literal = `[${queryVector.join(',')}]`;
   return query(
     `SELECT chunk_id AS "chunkId", document_version_id AS "documentVersionId", content,
-            chunk_index AS "chunkIndex", similarity, model, model_version AS "modelVersion", chunker
-     FROM octo.match_chunks($1, $2::vector, $3, $4)`,
-    [workspaceId, literal, matchCount, minSimilarity]
+            chunk_index AS "chunkIndex", similarity, lexical_score AS "lexicalScore", score,
+            model, model_version AS "modelVersion", chunker
+     FROM octo.match_chunks_hybrid($1, $2::vector, $3, $4)`,
+    [workspaceId, literal, queryText, matchCount]
   );
 }
 
