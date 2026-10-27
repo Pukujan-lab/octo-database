@@ -8,7 +8,7 @@
 import { embedTexts, loadEmbeddingConfigFromEnv } from '../rag/embeddings';
 import { chunkKey, chunkText, contentHash, extractText } from '../rag/pipeline';
 import { authenticateRequest, keyWorkspaceMatches, requireScope, roleAllows, scopeDenied } from '../server/auth-context';
-import { dbDeleteDocument, dbEnsureEmbeddingConfig, dbGetDocument, dbGetWorkspaceMembership, dbListDocuments, dbMatchChunks, dbRenameDocument, dbReplaceChunksAndEmbeddings, dbUpsertDocumentVersion, query } from '../server/db';
+import { dbDeleteDocument, dbEnsureEmbeddingConfig, dbGetDocument, dbGetWorkspaceMembership, dbListDocuments, dbMatchChunksHybrid, dbRenameDocument, dbReplaceChunksAndEmbeddings, dbUpsertDocumentVersion, query } from '../server/db';
 import { readJsonObject, requireUuid, sendJson } from '../server/http';
 import { attributeAgentAction } from '../server/ops';
 import { IncomingMessage, ServerResponse } from 'http';
@@ -180,10 +180,14 @@ export async function handleRagRoutes(
     }
 
     const { vectors } = await embedTexts(embeddingConfig, [query]);
-    const results = await dbMatchChunks(workspaceId, vectors[0]!, limit ?? 10, 0);
+    const results = await dbMatchChunksHybrid(workspaceId, query, vectors[0]!, limit ?? 10);
 
     sendJson(res, 200, {
       query,
+      // Hybrid: a lexical (full-text) arm and a vector arm, fused with RRF. Each
+      // match reports which arms found it -- `similarity` is null for a chunk only
+      // the lexical arm returned, `lexicalScore` null for a vector-only match.
+      mode: 'hybrid',
       matches: results,
       // Provenance: each match carries the version and the exact embedding/chunker
       // configuration that produced it.
