@@ -20,15 +20,15 @@ export function ConstellationField() {
         <ConstellationSky />
 
         <div
-          className="pointer-events-none absolute inset-0 bg-gradient-to-r from-background via-background/60 to-transparent lg:via-background/70"
+          className="pointer-events-none absolute inset-0 bg-gradient-to-r from-background via-background/50 to-transparent lg:from-background lg:via-background/25 lg:to-transparent"
           aria-hidden="true"
         />
         <div
-          className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background via-background/20 to-background lg:via-background/40"
+          className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background via-transparent to-background lg:via-transparent"
           aria-hidden="true"
         />
 
-        <div className="absolute inset-0">
+        <div className="pointer-events-none absolute inset-0">
           <div className="mx-auto flex h-full w-full max-w-6xl flex-col justify-end px-5 py-10 sm:px-8 lg:justify-center">
             <div className="pointer-events-none max-w-md">
               <p className="eyebrow">One workspace, one boundary</p>
