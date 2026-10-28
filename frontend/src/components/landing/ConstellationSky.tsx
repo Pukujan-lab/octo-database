@@ -382,7 +382,7 @@ export function ConstellationSky() {
         const el = document.createElement("span");
         el.textContent = anchor.label;
         el.className =
-          "absolute left-0 top-0 whitespace-nowrap font-display text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/75 transition-opacity duration-300";
+          "absolute left-0 top-0 whitespace-nowrap rounded-sm bg-background/70 px-1.5 py-0.5 font-display text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/75 backdrop-blur-[2px] transition-opacity duration-300";
         labels.appendChild(el);
         labelEls.set(anchor.id, el);
       });
@@ -408,7 +408,7 @@ export function ConstellationSky() {
         el.style.opacity = visible ? "1" : "0";
         el.style.transform = `translate(-50%,-50%) translate(${
           ((projected.x + 1) / 2) * rect.width
-        }px,${((1 - projected.y) / 2) * rect.height - 18}px)`;
+        }px,${((1 - projected.y) / 2) * rect.height - 34}px)`;
       });
     };
 
