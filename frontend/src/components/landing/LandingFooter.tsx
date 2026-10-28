@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import type { Health } from "@/lib/types";
 import { INTEGRATION_GUIDE_URL, REPOSITORY_URL } from "./links";
 
@@ -11,14 +12,9 @@ export function LandingFooter({ health }: { health: Health | undefined }) {
           <span aria-hidden="true">·</span>
           <span className="num">{health?.version ?? "—"}</span>
           <span aria-hidden="true">·</span>
-          <a
-            href={INTEGRATION_GUIDE_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="transition-colors hover:text-foreground"
-          >
+          <Link to={INTEGRATION_GUIDE_URL} className="transition-colors hover:text-foreground">
             Integration guide
-          </a>
+          </Link>
           <span aria-hidden="true">·</span>
           <a
             href={REPOSITORY_URL}
