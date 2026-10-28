@@ -254,6 +254,11 @@ export function ConstellationSky() {
       hole.recolor(next);
       recolorStars(far.points, far.seeds, next);
       recolorStars(near.points, near.seeds, next);
+      // The lens pass owns the photon ring it draws over the shadow, and it is
+      // built once, so its one colour has to be carried across by hand.
+      if (lensPass) {
+        (lensPass.material.uniforms.uRing.value as THREE.Color).copy(next.wash);
+      }
     });
     paletteObserver.observe(document.documentElement, {
       attributes: true,
