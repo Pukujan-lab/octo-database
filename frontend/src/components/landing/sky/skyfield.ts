@@ -109,7 +109,8 @@ export function buildSky(compact = false): {
       // Golden angle, so a wall's surfaces fan out instead of bunching on one side.
       const golden = i * 2.399963;
       const jitter = hash(id);
-      const lift = wall.surfaces.length === 1 ? 0 : i / (wall.surfaces.length - 1) - 0.5;
+      // Spread the surfaces evenly across the cluster's height, from -0.5 to 0.5.
+      const lift = i / (wall.surfaces.length - 1) - 0.5;
       const radius = spread * (0.68 + jitter * 0.44);
       stars.push({
         id,

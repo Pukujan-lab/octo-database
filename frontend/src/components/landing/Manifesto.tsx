@@ -4,18 +4,18 @@ import { ARCHITECTURE_URL } from "./links";
 const WALLS = [
   {
     title: "Isolate the blast radius",
-    body: "Every workspace provisions its own PostgreSQL database with its own role. Agents query it through the HTTP surface, so a raw connection string never reaches the model.",
-    tags: ["SQL surface", "File storage", "Shares"],
+    body: "Every workspace provisions its own PostgreSQL database with its own role. The server authenticates as that role, so an agent reaches the database with an Octo API key alone and no host, port or connection string ever reaches the model. Publishing a file copies that one file to a stable URL and leaves the rest of the workspace private.",
+    tags: ["SQL surface", "Files", "Gallery", "Shares"],
   },
   {
     title: "Keep deletion human",
-    body: "Destructive operations require a confirmation secret bound to a human factor. Vault credentials stay behind a relay, so a working key is never handed to the model.",
-    tags: ["API keys", "Vault relay", "Audit log"],
+    body: "Creating or deleting a workspace, minting a key, or widening a key's scopes needs a confirmation secret bound to a human MFA session, so a bare API key cannot do them. The vault relay injects the real credential into an outbound request, so the caller works with a temporary key and never holds the underlying secret. Hosted MCP clients authorize over OAuth 2.1, and the activity feed records what happened in the workspace.",
+    tags: ["API keys", "Vault relay", "MFA", "Audit log", "OAuth 2.1"],
   },
   {
     title: "Move compute off the control plane",
-    body: "DuckDB runs ephemerally against Parquet objects in object storage. Hybrid retrieval fuses a lexical arm and a vector arm over 1024-dimensional embeddings, so a heavy query or a hard search cannot take the control plane down.",
-    tags: ["Analytics", "Hybrid RAG", "Graph projection", "MCP"],
+    body: "Analytics runs DuckDB ephemerally over Parquet in object storage, and the caller submits a named query spec against a registered dataset version rather than SQL, so the server builds the statement and a request cannot widen the read or inject SQL. Hybrid retrieval fuses a lexical arm and a vector arm over 1024-dimensional embeddings. Documents and entities project into a property graph, claims land in a bitemporal ledger with as-of queries, and background jobs can be listed and retried without loading the control plane.",
+    tags: ["Analytics", "Hybrid RAG", "Graph", "Epistemic ledger", "Jobs and ops"],
   },
 ];
 
@@ -74,6 +74,8 @@ export function Manifesto() {
               Agents run at full speed because the walls are structural, not polite. Every
               workspace is a separate PostgreSQL database, reachable only through an MCP-native
               HTTP surface. Destructive operations stop at a confirmation secret bound to a human.
+              The same key provisions databases, stores and publishes files, runs analytics,
+              retrieves documents and records claims.
             </p>
           </Beat>
 
@@ -107,6 +109,14 @@ export function Manifesto() {
                 </div>
               ))}
             </div>
+            <p className="mt-6 text-sm leading-relaxed text-muted-foreground">
+              The same surface is exposed to agents over MCP: 29 tools on a Streamable HTTP server
+              at /mcp, including create_workspace, provision_database, query_workspace_database,
+              upload_file and query_dataset. Hosted clients authorize over OAuth 2.1, and GET
+              /api/capabilities returns the full catalogue for the calling credential&apos;s scopes,
+              so a client discovers what it may do at runtime rather than from documentation that
+              drifts.
+            </p>
           </div>
         </div>
 
