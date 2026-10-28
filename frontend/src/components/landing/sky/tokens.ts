@@ -21,6 +21,15 @@ export type SkyTokens = {
   wash: THREE.Color;
   /** A saturated violet from the chart ramp, for the disk's hot middle. */
   plasma: THREE.Color;
+  /** Whether the page is in the dark variant. Points are drawn additively on a
+   *  dark background and normally on a light one, where additive white vanishes. */
+  dark: boolean;
+  /** A surface's point in the named constellation. Starlight on a dark sky; the
+   *  foreground on a light one, where a washed colour would dissolve into the page. */
+  mark: THREE.Color;
+  /** A wall's anchor point: the washed signal colour on a dark sky, the signal
+   *  colour itself on a light one, so an anchor still outranks its surfaces. */
+  beacon: THREE.Color;
 };
 
 function tokenColor(styles: CSSStyleDeclaration, name: string): THREE.Color | null {
@@ -68,14 +77,19 @@ export function readTokens(): SkyTokens | null {
   // colour washed out — so a star stays a star on either background.
   const fgHsl = { h: 0, s: 0, l: 0 };
   foreground.getHSL(fgHsl);
-  const light = fgHsl.l > 0.55 ? foreground : lift(hot, 0.72, 0.55);
+  const dark = fgHsl.l > 0.55;
+  const light = dark ? foreground : lift(hot, 0.72, 0.55);
+  const wash = lift(hot, 0.62, 0.42);
 
   return {
     light,
     warm,
     hot,
     cool,
-    wash: lift(hot, 0.62, 0.42),
+    wash,
     plasma,
+    dark,
+    mark: dark ? light : foreground,
+    beacon: dark ? wash : hot,
   };
 }
