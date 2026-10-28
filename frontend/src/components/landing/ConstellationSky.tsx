@@ -392,12 +392,6 @@ export function ConstellationSky() {
       if (downInside) event.preventDefault();
     };
 
-    // Chromium can still start a selection from a synthetic drag even with the
-    // pointerdown cancelled, which paints the copy behind the band green.
-    const onSelectStart = (event: Event) => {
-      if (downInside) event.preventDefault();
-    };
-
     const onPointerMove = (event: PointerEvent) => {
       if (event.pointerType === "mouse") {
         canvas.style.cursor = inGestureZone(event.clientX, event.clientY) ? "grab" : "default";
@@ -409,7 +403,6 @@ export function ConstellationSky() {
     canvas.addEventListener("pointercancel", releaseGesture);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("touchmove", onTouchMove, { passive: false });
-    canvas.addEventListener("selectstart", onSelectStart);
 
     // Reduced motion slows the sky instead of stopping it, matching the hole's
     // own reduced-motion behaviour.
@@ -471,7 +464,6 @@ export function ConstellationSky() {
       canvas.removeEventListener("pointercancel", releaseGesture);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("touchmove", onTouchMove);
-      canvas.removeEventListener("selectstart", onSelectStart);
       controls.dispose();
       hole.dispose();
       lensPass?.dispose();
