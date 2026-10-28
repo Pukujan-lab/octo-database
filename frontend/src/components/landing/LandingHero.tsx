@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { SignInCard } from "@/components/portal/SignInCard";
 import { INTEGRATION_GUIDE_URL } from "./links";
@@ -42,14 +43,12 @@ export function LandingHero({
             <Button asChild size="lg">
               <a href="#sign-in">Start a session</a>
             </Button>
-            <a
-              href={INTEGRATION_GUIDE_URL}
-              target="_blank"
-              rel="noreferrer"
+            <Link
+              to={INTEGRATION_GUIDE_URL}
               className="text-sm font-medium text-foreground underline decoration-border underline-offset-4 transition-colors hover:decoration-foreground"
             >
               Read the integration guide
-            </a>
+            </Link>
           </div>
 
           <dl className="mt-10 grid grid-cols-1 divide-y divide-border border-t border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">

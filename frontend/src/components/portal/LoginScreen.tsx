@@ -39,6 +39,7 @@ export function LoginScreen({
       </header>
 
       <main>
+        <ConstellationField />
         <LandingHero
           health={health}
           healthPending={healthPending}
@@ -47,7 +48,6 @@ export function LoginScreen({
           onGuest={onGuest}
           isDark={isDark}
         />
-        <ConstellationField />
         <Manifesto />
       </main>
 
