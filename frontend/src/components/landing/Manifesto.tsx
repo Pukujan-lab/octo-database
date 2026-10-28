@@ -4,7 +4,7 @@ import { ARCHITECTURE_URL } from "./links";
 const WALLS = [
   {
     title: "Isolate the blast radius",
-    body: "Every workspace provisions its own PostgreSQL database with its own role. The server authenticates as that role, so an agent reaches the database with an Octo API key alone and no host, port or connection string ever reaches the model. Publishing a file copies that one file to a stable URL and leaves the rest of the workspace private.",
+    body: "Every workspace provisions its own PostgreSQL database with its own role. The server authenticates as that role, so an agent reaches the database with an Octo API key alone and no host, port or connection string ever reaches the model. Files can be published one at a time to a stable URL, and archived to a cold tier that restores on demand where a Drive provider is configured; nothing else in the workspace becomes public.",
     tags: ["SQL surface", "Files", "Gallery", "Shares"],
   },
   {
