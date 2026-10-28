@@ -6,7 +6,7 @@ import type { Health } from "@/lib/types";
 const PROOF = [
   { label: "Per-workspace Postgres", line: "Own database, own role." },
   { label: "MCP-native HTTP", line: "One surface for people and agents." },
-  { label: "DuckDB analytics", line: "Ephemeral compute over Parquet." },
+  { label: "29 MCP tools", line: "Discover them at /api/capabilities." },
 ];
 
 /** Section 1: intro copy and the sign-in card, side by side on desktop. */
@@ -34,8 +34,8 @@ export function LandingHero({
             Your project&apos;s data layer.
           </h1>
           <p className="mt-5 text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Every project gets its own database, file storage, analytics, retrieval and
-            credentials. One API, one server, nothing to rebuild.
+            Every project gets its own database, file storage, analytics, retrieval, shares, a
+            graph, credentials and an audit trail. One API, one server, nothing to rebuild.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-x-7 gap-y-4">

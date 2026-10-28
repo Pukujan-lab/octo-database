@@ -8,7 +8,15 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 
 import { BlackHole, SHADOW_RADIUS } from "./sky/blackhole";
 import { createLensingShader, lensGeometry } from "./sky/lensing";
+import { buildSky, type Vec3 } from "./sky/skyfield";
 import { readTokens, type SkyTokens } from "./sky/tokens";
+
+/** Desktop aims the hole at the middle of the open sky right of the copy column,
+ *  so the constellation ring and its wall labels never cross the trace. */
+const DESKTOP_AIM_X = -1.9;
+/** How far the named field slides right on desktop, in world units. The hole
+ *  slides with it, so the ring stays centred on the boundary it is bent around. */
+const DESKTOP_SKY_SHIFT = 4.6;
 
 /* ------------------------------------------------------------------- stars */
 
@@ -103,8 +111,146 @@ function recolorStars(
 }
 
 /**
+ * The named layer: one star per surface, a brighter star per wall, and the edges
+ * that tie each surface to the wall it belongs to. Positions come from
+ * `skyfield`, so they are the same on every load.
+ *
+ * The stars take `tokens.mark` and the anchors `tokens.beacon`, so the three
+ * walls read as the bright things in the field. The edges use the cool token and
+ * normal blending rather than additive: a one-pixel hairline added to a
+ * near-white background disappears, which would leave the links invisible on
+ * half the palettes.
+ */
+function makeConstellation(tokens: SkyTokens, compact: boolean) {
+  const { anchors, stars, edges } = buildSky(compact);
+
+  // The band's copy takes the left of the frame, so on desktop the whole field
+  // slides right until its leftmost wall clears the trace. Shifting the
+  // coordinates themselves keeps the points, the edges, and the projected labels
+  // in agreement; moving the group instead would leave the labels behind.
+  if (!compact) {
+    const shift = (p: Vec3): Vec3 => [p[0] + DESKTOP_SKY_SHIFT, p[1], p[2]];
+    anchors.forEach((anchor) => {
+      anchor.position = shift(anchor.position);
+    });
+    stars.forEach((star) => {
+      star.position = shift(star.position);
+    });
+  }
+
+  const position = new Float32Array(stars.length * 3);
+  const color = new Float32Array(stars.length * 3);
+  stars.forEach((star, i) => {
+    position[i * 3] = star.position[0];
+    position[i * 3 + 1] = star.position[1];
+    position[i * 3 + 2] = star.position[2];
+    color[i * 3] = tokens.mark.r;
+    color[i * 3 + 1] = tokens.mark.g;
+    color[i * 3 + 2] = tokens.mark.b;
+  });
+
+  const starGeometry = new THREE.BufferGeometry();
+  starGeometry.setAttribute("position", new THREE.BufferAttribute(position, 3));
+  starGeometry.setAttribute("color", new THREE.BufferAttribute(color, 3));
+  const starMaterial = new THREE.PointsMaterial({
+    size: 0.62,
+    sizeAttenuation: true,
+    map: getStarTexture(),
+    transparent: true,
+    depthWrite: false,
+    blending: tokens.dark ? THREE.AdditiveBlending : THREE.NormalBlending,
+    vertexColors: true,
+    opacity: 0.95,
+  });
+
+  const anchorPosition = new Float32Array(anchors.length * 3);
+  anchors.forEach((anchor, i) => {
+    anchorPosition[i * 3] = anchor.position[0];
+    anchorPosition[i * 3 + 1] = anchor.position[1];
+    anchorPosition[i * 3 + 2] = anchor.position[2];
+  });
+  const anchorGeometry = new THREE.BufferGeometry();
+  anchorGeometry.setAttribute("position", new THREE.BufferAttribute(anchorPosition, 3));
+  const anchorMaterial = new THREE.PointsMaterial({
+    size: 1.5,
+    sizeAttenuation: true,
+    map: getStarTexture(),
+    transparent: true,
+    depthWrite: false,
+    blending: tokens.dark ? THREE.AdditiveBlending : THREE.NormalBlending,
+    color: tokens.beacon.clone(),
+    opacity: 0.9,
+  });
+
+  const byId = new Map<string, THREE.Vector3>();
+  anchors.forEach((anchor) =>
+    byId.set(anchor.id, new THREE.Vector3(...anchor.position)),
+  );
+  stars.forEach((star) => byId.set(star.id, new THREE.Vector3(...star.position)));
+
+  const edgePosition = new Float32Array(edges.length * 6);
+  let cursor = 0;
+  edges.forEach((edge) => {
+    const from = byId.get(edge.fromId);
+    const to = byId.get(edge.toId);
+    if (!from || !to) return;
+    edgePosition[cursor] = from.x;
+    edgePosition[cursor + 1] = from.y;
+    edgePosition[cursor + 2] = from.z;
+    edgePosition[cursor + 3] = to.x;
+    edgePosition[cursor + 4] = to.y;
+    edgePosition[cursor + 5] = to.z;
+    cursor += 6;
+  });
+  const edgeGeometry = new THREE.BufferGeometry();
+  edgeGeometry.setAttribute(
+    "position",
+    new THREE.BufferAttribute(edgePosition.subarray(0, cursor), 3),
+  );
+  const edgeMaterial = new THREE.LineBasicMaterial({
+    color: tokens.cool.clone(),
+    transparent: true,
+    opacity: 0.32,
+    depthWrite: false,
+    depthTest: true,
+  });
+
+  const stars3d = new THREE.Points(starGeometry, starMaterial);
+  const anchors3d = new THREE.Points(anchorGeometry, anchorMaterial);
+  const links = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+
+  return {
+    anchors,
+    stars,
+    group: new THREE.Group(),
+    objects: [stars3d, anchors3d, links],
+    geometries: [starGeometry, anchorGeometry, edgeGeometry],
+    materials: [starMaterial, anchorMaterial, edgeMaterial],
+    recolor(next: SkyTokens) {
+      const starColors = starGeometry.getAttribute("color") as THREE.BufferAttribute;
+      for (let i = 0; i < stars.length; i += 1) {
+        starColors.setXYZ(i, next.mark.r, next.mark.g, next.mark.b);
+      }
+      starColors.needsUpdate = true;
+      const blending = next.dark ? THREE.AdditiveBlending : THREE.NormalBlending;
+      starMaterial.blending = blending;
+      anchorMaterial.blending = blending;
+      anchorMaterial.color.copy(next.beacon);
+      edgeMaterial.color.copy(next.cool);
+    },
+  };
+}
+
+/**
  * The band's sky: the ported black hole in a drifting starfield, with the
  * screen-space lensing pass bending everything behind it.
+ *
+ * The starfield is not scenery. Three labelled anchors are the walls the copy
+ * below the band names, and the stars around each one are the surfaces that wall
+ * is built from, so the sky and the prose say the same thing twice. The layout is
+ * fixed, so a reader who points at a star today points at the same one tomorrow.
+ * The hole sits inside that field and bends it: the constellation is what the
+ * boundary is holding.
  *
  * The hole itself holds still and the sky moves: the shells drift at their own
  * rates, the hole runs its pulse, and page scroll adds a desktop-only parallax.
@@ -116,10 +262,12 @@ function recolorStars(
  */
 export function ConstellationSky() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const labelsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const labels = labelsRef.current;
     const initialTokens = readTokens();
     if (!initialTokens) return;
 
@@ -140,14 +288,20 @@ export function ConstellationSky() {
     /*
      * Where the camera looks decides where the hole lands in the frame, and the
      * band's copy decides where it should land. On desktop the copy is a column
-     * down the left, so the hole aims right of centre; on a phone the copy sits
-     * at the bottom, so it aims below the origin and the hole rides above it.
+     * down the left, so the hole aims at the centre of the open sky beside it
+     * rather than at the page's centre; the ring the walls sit on then stays
+     * clear of the copy and its labels never cross the trace. On a phone the copy
+     * sits at the bottom, so it aims below the origin and the hole rides above it.
      * Both keep the hole clear of the scrim, which is what made it read as a
      * smudge rather than a hole.
      */
+    // The named field's geometry is built once, so the layout that frames it is
+    // fixed at mount too: a resize that crosses the breakpoint must not move the
+    // camera away from stars that are staying where they were laid out.
+    const desktop = viewWidth >= 1024;
     const aimTarget = new THREE.Vector3(
-      viewWidth >= 1024 ? -1.9 : 0,
-      viewWidth >= 1024 ? 0.5 : -1.5,
+      desktop ? DESKTOP_AIM_X : 0,
+      desktop ? 0.5 : -1.5,
       0,
     );
     camera.lookAt(aimTarget);
@@ -190,17 +344,73 @@ export function ConstellationSky() {
     /* ------------------------------------------------------- the sky's bodies */
 
     const farShell = new THREE.Group();
-    const nearShell = new THREE.Group();
     const hole = new BlackHole(initialTokens);
-    scene.add(farShell, nearShell, hole.group);
+    // The hole and the named field move as one body: the ring is the field the
+    // boundary bends, so it has to stay centred on the horizon.
+    if (desktop) hole.group.position.x = DESKTOP_SKY_SHIFT;
+    scene.add(farShell, hole.group);
 
     const far = makeStars(560, 46, 120, 0.14, initialTokens);
-    const near = makeStars(220, 22, 46, 0.26, initialTokens);
     farShell.add(far.points);
-    nearShell.add(near.points);
 
-    const geometries = [far.points.geometry, near.points.geometry];
-    const materials = [far.points.material as THREE.Material, near.points.material as THREE.Material];
+    // The named layer holds still while the background drifts: a star you can
+    // point at is only useful if it stays where you left it.
+    const constellation = makeConstellation(initialTokens, !desktop);
+    constellation.group.add(...constellation.objects);
+    scene.add(constellation.group);
+
+    const geometries = [
+      far.points.geometry,
+      ...constellation.geometries,
+    ];
+    const materials = [
+      far.points.material as THREE.Material,
+      ...constellation.materials,
+    ];
+
+    /* --------------------------------------------------------------- labels */
+
+    /*
+     * The three wall labels are DOM, projected from the same camera the scene
+     * uses. A WebGL text texture would have to be regenerated for every palette
+     * and would blur at the wrong pixel ratio; a projected element inherits the
+     * page's own type and colour, which is the point of drawing the walls at all.
+     */
+    const labelEls = new Map<string, HTMLElement>();
+    if (labels) {
+      constellation.anchors.forEach((anchor) => {
+        const el = document.createElement("span");
+        el.textContent = anchor.label;
+        el.className =
+          "absolute left-0 top-0 whitespace-nowrap rounded-sm bg-background/70 px-1.5 py-0.5 font-display text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/75 backdrop-blur-[2px] transition-opacity duration-300";
+        labels.appendChild(el);
+        labelEls.set(anchor.id, el);
+      });
+    }
+
+    const projected = new THREE.Vector3();
+
+    const placeLabels = () => {
+      if (!labels) return;
+      const rect = canvas.getBoundingClientRect();
+      constellation.anchors.forEach((anchor) => {
+        const el = labelEls.get(anchor.id);
+        if (!el) return;
+        projected.set(anchor.position[0], anchor.position[1], anchor.position[2]);
+        projected.project(camera);
+        const margin = 40 / Math.max(rect.width, 1);
+        const visible =
+          projected.z < 1 &&
+          projected.x > -1 - margin &&
+          projected.x < 1 + margin &&
+          projected.y > -1 - margin &&
+          projected.y < 1 + margin;
+        el.style.opacity = visible ? "1" : "0";
+        el.style.transform = `translate(-50%,-50%) translate(${
+          ((projected.x + 1) / 2) * rect.width
+        }px,${((1 - projected.y) / 2) * rect.height - 34}px)`;
+      });
+    };
 
     /* --------------------------------------------------------- lensing pass */
 
@@ -253,7 +463,7 @@ export function ConstellationSky() {
       if (!next) return;
       hole.recolor(next);
       recolorStars(far.points, far.seeds, next);
-      recolorStars(near.points, near.seeds, next);
+      constellation.recolor(next);
       // The lens pass owns the photon ring it draws over the shadow, and it is
       // built once, so its one colour has to be carried across by hand.
       if (lensPass) {
@@ -289,11 +499,9 @@ export function ConstellationSky() {
       const drift = reduced ? 0.15 : 1;
 
       farShell.rotation.y = -elapsed * 0.006 * drift;
-      nearShell.rotation.y = elapsed * 0.012 * drift;
       farShell.rotation.x = Math.sin(elapsed * 0.02) * 0.03 * drift;
       if (parallax) {
         farShell.position.y = scrollOffset * 0.006;
-        nearShell.position.y = scrollOffset * 0.013;
       }
 
       // The drag the reader made is applied before the hole is measured, so the
@@ -301,6 +509,9 @@ export function ConstellationSky() {
       controls.update();
 
       hole.update(delta * (reduced ? 0.35 : 1));
+
+      // Labels follow the camera, so they are placed after the controls settle.
+      placeLabels();
 
       const aim = aimLens();
       if (aim) {
@@ -419,16 +630,9 @@ export function ConstellationSky() {
       viewHeight = canvas.clientHeight || 1;
       camera.aspect = viewWidth / viewHeight;
       camera.updateProjectionMatrix();
-      // The aim target is a breakpoint decision, not a per-pixel one: only move
-      // it when the band has actually crossed into the other layout, or a resize
-      // would yank the hole out from under a reader who is dragging it.
-      const wantX = viewWidth >= 1024 ? -1.9 : 0;
-      const wantY = viewWidth >= 1024 ? 0.5 : -1.5;
-      if (aimTarget.x !== wantX || aimTarget.y !== wantY) {
-        aimTarget.set(wantX, wantY, 0);
-        controls.target.copy(aimTarget);
-        controls.update();
-      }
+      // The aim and the named field's layout are both mount-time decisions, so a
+      // resize only re-frames: moving the aim here would take the hole off a ring
+      // that is staying where it was laid out.
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       renderer.setPixelRatio(ratio);
       renderer.setSize(viewWidth, viewHeight, false);
@@ -469,6 +673,7 @@ export function ConstellationSky() {
       canvas.removeEventListener("pointercancel", releaseGesture);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("touchmove", onTouchMove);
+      labelEls.forEach((el) => el.remove());
       controls.dispose();
       hole.dispose();
       lensPass?.dispose();
@@ -479,5 +684,14 @@ export function ConstellationSky() {
     };
   }, []);
 
-  return <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 h-full w-full" />;
+  return (
+    <>
+      <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 h-full w-full" />
+      <div
+        ref={labelsRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 hidden overflow-hidden lg:block"
+      />
+    </>
+  );
 }
