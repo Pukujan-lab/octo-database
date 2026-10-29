@@ -48,6 +48,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/docs" element={<DocsPage />} />
+          <Route path="/docs/:slug" element={<DocsPage />} />
           <Route path="/credential-plane" element={<CredentialPlanePage />} />
           {/* Tokens may themselves contain slashes, so the splat is decoded whole. */}
           <Route path="/share/*" element={<ShareRoute />} />
