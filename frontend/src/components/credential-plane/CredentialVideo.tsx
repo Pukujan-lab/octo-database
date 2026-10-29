@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pause, Play } from "lucide-react";
+import { Pause, Play, Volume2, VolumeX } from "lucide-react";
 
 const VIDEO_SRC = "/credential-plane.mp4";
 const POSTER_SRC = "/credential-plane-poster.jpg";
@@ -32,14 +32,17 @@ function WirePlate() {
 }
 
 /**
- * The centrepiece. Square, full-bleed on a phone, muted and inline, and it
- * starts itself when it scrolls into view and stops when it leaves. The frame
- * is sized by aspect ratio, so no state of loading can move the page.
+ * The centrepiece. Square, full-bleed on a phone and inline. It starts itself
+ * muted when it scrolls into view, because every browser blocks sound before a
+ * gesture, and stops when it leaves. Sound is one tap away and stays on once
+ * chosen. The frame is sized by aspect ratio, so no state of loading can move
+ * the page.
  */
 export function CredentialVideo() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const pausedByHand = useRef(false);
   const [playing, setPlaying] = useState(false);
+  const [soundOn, setSoundOn] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
 
   const play = useCallback(() => {
@@ -84,6 +87,18 @@ export function CredentialVideo() {
     }
   };
 
+  const toggleSound = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const next = !soundOn;
+    video.muted = !next;
+    setSoundOn(next);
+    if (next && video.paused) {
+      pausedByHand.current = false;
+      play();
+    }
+  };
+
   return (
     <div className="relative aspect-square w-full overflow-hidden border border-border bg-background">
       <WirePlate />
@@ -98,7 +113,7 @@ export function CredentialVideo() {
         muted
         loop
         preload="metadata"
-        aria-label="Ninety seconds, silent: give it everything, hand it nothing."
+        aria-label="Ninety seconds: give it everything, hand it nothing."
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onError={() => {
@@ -115,19 +130,35 @@ export function CredentialVideo() {
       </div>
 
       {unavailable ? null : (
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label={playing ? "Pause the film" : "Play the film"}
-          className="absolute bottom-3 right-3 inline-flex items-center gap-2 border border-border bg-background/85 px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground backdrop-blur transition-colors duration-500 hover:border-info/60 hover:text-info"
-        >
-          {playing ? (
-            <Pause className="h-3.5 w-3.5" strokeWidth={1.5} />
-          ) : (
-            <Play className="h-3.5 w-3.5" strokeWidth={1.5} />
-          )}
-          <span>{playing ? "Pause" : "Play"}</span>
-        </button>
+        <div className="absolute bottom-3 right-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleSound}
+            aria-label={soundOn ? "Mute the narration" : "Unmute the narration"}
+            aria-pressed={soundOn}
+            className="inline-flex items-center gap-2 border border-border bg-background/85 px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground backdrop-blur transition-colors duration-500 hover:border-info/60 hover:text-info"
+          >
+            {soundOn ? (
+              <Volume2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+            ) : (
+              <VolumeX className="h-3.5 w-3.5" strokeWidth={1.5} />
+            )}
+            <span>{soundOn ? "Sound on" : "Sound off"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={playing ? "Pause the film" : "Play the film"}
+            className="inline-flex items-center gap-2 border border-border bg-background/85 px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground backdrop-blur transition-colors duration-500 hover:border-info/60 hover:text-info"
+          >
+            {playing ? (
+              <Pause className="h-3.5 w-3.5" strokeWidth={1.5} />
+            ) : (
+              <Play className="h-3.5 w-3.5" strokeWidth={1.5} />
+            )}
+            <span>{playing ? "Pause" : "Play"}</span>
+          </button>
+        </div>
       )}
     </div>
   );
