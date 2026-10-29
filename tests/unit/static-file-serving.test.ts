@@ -23,7 +23,7 @@ describe('sendStaticFile', () => {
     fs.writeFileSync(goodFile, '<h1>ok</h1>');
     server = http.createServer((req, res) => {
       const target = req.url === '/good' ? goodFile : path.join(dir, 'missing.html');
-      sendStaticFile(res, target, 'text/html; charset=utf-8');
+      sendStaticFile(res, target, 'text/html; charset=utf-8', req.headers.range);
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();
@@ -51,5 +51,19 @@ describe('sendStaticFile', () => {
     const again = await fetch(`${base}/good`);
     expect(again.status).toBe(200);
     expect(await again.text()).toBe('<h1>ok</h1>');
+  });
+
+  it('serves a byte range as 206, which is what an inline video needs', async () => {
+    const response = await fetch(`${base}/good`, { headers: { Range: 'bytes=1-4' } });
+    expect(response.status).toBe(206);
+    expect(response.headers.get('content-range')).toBe('bytes 1-4/11');
+    expect(response.headers.get('accept-ranges')).toBe('bytes');
+    expect(await response.text()).toBe('h1>o');
+  });
+
+  it('answers a range past the end with 416', async () => {
+    const response = await fetch(`${base}/good`, { headers: { Range: 'bytes=50-60' } });
+    expect(response.status).toBe(416);
+    expect(response.headers.get('content-range')).toBe('bytes */11');
   });
 });

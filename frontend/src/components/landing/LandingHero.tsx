@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SignInCard } from "@/components/portal/SignInCard";
 import { INTEGRATION_GUIDE_URL } from "./links";
@@ -50,6 +51,22 @@ export function LandingHero({
               Read the integration guide
             </Link>
           </div>
+
+          <Link
+            to="/credential-plane"
+            className="group mt-9 flex items-center justify-between gap-4 border border-border px-4 py-3 transition-colors duration-500 hover:border-info/50"
+          >
+            <span className="flex min-w-0 items-baseline gap-3">
+              <span className="eyebrow shrink-0 text-info/80">New</span>
+              <span className="truncate font-display text-sm font-semibold tracking-tight">
+                The credential plane
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground transition-colors duration-500 group-hover:text-info">
+              <span className="hidden sm:inline">Give it everything. Hand it nothing.</span>
+              <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={1.5} />
+            </span>
+          </Link>
 
           <dl className="mt-10 grid grid-cols-1 divide-y divide-border border-t border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             {PROOF.map((item) => (
