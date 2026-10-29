@@ -33,27 +33,42 @@ function WirePlate() {
 
 /**
  * The centrepiece. Square, full-bleed on a phone and inline. It starts itself
- * muted when it scrolls into view, because every browser blocks sound before a
- * gesture, and stops when it leaves. Sound is one tap away and stays on once
- * chosen. The frame is sized by aspect ratio, so no state of loading can move
- * the page.
+ * when it scrolls into view and stops when it leaves.
+ *
+ * Sound is attempted first, not last: a visitor who has already clicked
+ * anywhere on the page is allowed to hear it, and starting muted meant nobody
+ * ever did. Only when the browser refuses does it fall back to a silent start,
+ * which the control then offers to undo. The frame is sized by aspect ratio, so
+ * no state of loading can move the page.
  */
 export function CredentialVideo() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const pausedByHand = useRef(false);
+  const soundChoice = useRef<boolean | null>(null);
   const [playing, setPlaying] = useState(false);
   const [soundOn, setSoundOn] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
 
-  const play = useCallback(() => {
-    const started = videoRef.current?.play();
-    if (started) started.catch(() => setPlaying(false));
-  }, []);
-
-  useEffect(() => {
+  const play = useCallback(async () => {
     const video = videoRef.current;
     if (!video) return;
-    video.muted = true;
+    if (soundChoice.current !== false) {
+      video.muted = false;
+      try {
+        await video.play();
+        soundChoice.current = true;
+        setSoundOn(true);
+        return;
+      } catch {
+        video.muted = true;
+        setSoundOn(false);
+      }
+    }
+    try {
+      await video.play();
+    } catch {
+      setPlaying(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -63,7 +78,7 @@ export function CredentialVideo() {
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
-            if (!pausedByHand.current) play();
+            if (!pausedByHand.current) void play();
           } else {
             video.pause();
           }
@@ -75,12 +90,36 @@ export function CredentialVideo() {
     return () => observer.disconnect();
   }, [play]);
 
+  /**
+   * The first gesture anywhere on the page is the moment the browser will
+   * allow sound. Without this the film stays silent for a visitor who reads
+   * before they reach the video, which is most of them.
+   */
+  useEffect(() => {
+    if (soundChoice.current !== null) return;
+    const unlock = () => {
+      const video = videoRef.current;
+      if (!video || soundChoice.current !== null || video.paused) return;
+      video.muted = false;
+      setSoundOn(true);
+    };
+    const opts = { once: true, passive: true } as const;
+    window.addEventListener("pointerdown", unlock, opts);
+    window.addEventListener("keydown", unlock, opts);
+    window.addEventListener("touchstart", unlock, opts);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+      window.removeEventListener("touchstart", unlock);
+    };
+  }, []);
+
   const toggle = () => {
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
       pausedByHand.current = false;
-      play();
+      void play();
     } else {
       pausedByHand.current = true;
       video.pause();
@@ -92,10 +131,11 @@ export function CredentialVideo() {
     if (!video) return;
     const next = !soundOn;
     video.muted = !next;
+    soundChoice.current = next;
     setSoundOn(next);
     if (next && video.paused) {
       pausedByHand.current = false;
-      play();
+      void play();
     }
   };
 
