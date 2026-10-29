@@ -38,12 +38,13 @@ export async function handleStaticRoutes(
         '.svg': 'image/svg+xml',
         '.ico': 'image/x-icon',
         '.webp': 'image/webp',
+        '.mp4': 'video/mp4',
         '.woff': 'font/woff',
         '.woff2': 'font/woff2',
         '.ttf': 'font/ttf',
       };
       const contentType = contentTypes[ext] ?? 'application/octet-stream';
-      sendStaticFile(res, filePath, contentType);
+      sendStaticFile(res, filePath, contentType, req.headers.range);
       return true;
     }
 
