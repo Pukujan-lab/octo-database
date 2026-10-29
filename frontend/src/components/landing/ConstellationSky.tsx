@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
@@ -10,6 +11,7 @@ import { BlackHole, SHADOW_RADIUS } from "./sky/blackhole";
 import { createLensingShader, lensGeometry } from "./sky/lensing";
 import { buildSky, type Vec3 } from "./sky/skyfield";
 import { readTokens, type SkyTokens } from "./sky/tokens";
+import { INTEGRATION_GUIDE_URL } from "./links";
 
 /** Desktop aims the hole at the middle of the open sky right of the copy column,
  *  so the constellation ring and its wall labels never cross the trace. */
@@ -223,6 +225,8 @@ function makeConstellation(tokens: SkyTokens, compact: boolean) {
     anchors,
     stars,
     group: new THREE.Group(),
+    anchorPoints: anchors3d,
+    starPoints: stars3d,
     objects: [stars3d, anchors3d, links],
     geometries: [starGeometry, anchorGeometry, edgeGeometry],
     materials: [starMaterial, anchorMaterial, edgeMaterial],
@@ -263,6 +267,12 @@ function makeConstellation(tokens: SkyTokens, compact: boolean) {
 export function ConstellationSky() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const labelsRef = useRef<HTMLDivElement | null>(null);
+  const focusRef = useRef<HTMLDivElement | null>(null);
+  const navigate = useNavigate();
+  // The scene is built once, so it cannot capture a router function that may be
+  // replaced on a later render. The ref is what the card's link reads.
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -348,6 +358,11 @@ export function ConstellationSky() {
     // The hole and the named field move as one body: the ring is the field the
     // boundary bends, so it has to stay centred on the horizon.
     if (desktop) hole.group.position.x = DESKTOP_SKY_SHIFT;
+    // A phone's frame is too narrow for the disk and the ring at the same scale:
+    // the disk covers the walls. Shrinking the hole alone keeps the ring where it
+    // was laid out and gives the clusters room around the shadow.
+    const holeScale = desktop ? 1 : 0.66;
+    hole.group.scale.setScalar(holeScale);
     scene.add(farShell, hole.group);
 
     const far = makeStars(560, 46, 120, 0.14, initialTokens);
@@ -380,7 +395,10 @@ export function ConstellationSky() {
     if (labels) {
       constellation.anchors.forEach((anchor) => {
         const el = document.createElement("span");
-        el.textContent = anchor.label;
+        // A phone's frame is 390px wide; the full wall names overlap each other
+        // and the nodes, so compact layouts use the short name and the card
+        // carries the full one.
+        el.textContent = desktop ? anchor.label : anchor.short;
         el.className =
           "absolute left-0 top-0 whitespace-nowrap rounded-sm bg-background/70 px-1.5 py-0.5 font-display text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/75 backdrop-blur-[2px] transition-opacity duration-300";
         labels.appendChild(el);
@@ -389,6 +407,9 @@ export function ConstellationSky() {
     }
 
     const projected = new THREE.Vector3();
+    // Measured once per label: reading `offsetWidth` every frame would force a
+    // layout on each one, and the label's type never changes size.
+    const labelSizes = new Map<string, { w: number; h: number }>();
 
     const placeLabels = () => {
       if (!labels) return;
@@ -406,10 +427,207 @@ export function ConstellationSky() {
           projected.y > -1 - margin &&
           projected.y < 1 + margin;
         el.style.opacity = visible ? "1" : "0";
-        el.style.transform = `translate(-50%,-50%) translate(${
-          ((projected.x + 1) / 2) * rect.width
-        }px,${((1 - projected.y) / 2) * rect.height - 34}px)`;
+        if (!visible) return;
+
+        let size = labelSizes.get(anchor.id);
+        if (!size || !size.w) {
+          size = { w: el.offsetWidth, h: el.offsetHeight };
+          if (size.w) labelSizes.set(anchor.id, size);
+        }
+        const halfW = size.w / 2;
+        // Clamped, so a wall near the frame's edge keeps its whole label on
+        // screen instead of losing half of it to the overflow clip.
+        const x = Math.min(
+          Math.max(((projected.x + 1) / 2) * rect.width, halfW + 6),
+          rect.width - halfW - 6,
+        );
+        const nodeY = ((1 - projected.y) / 2) * rect.height;
+        // Above the point where there is room, below it where there is not: on a
+        // phone the upper walls sit close to the band's top edge.
+        const y = nodeY - 34 - size.h / 2 < 6 ? nodeY + 34 : nodeY - 34;
+        el.style.transform = `translate(-50%,-50%) translate(${x}px,${y}px)`;
       });
+    };
+
+    /* --------------------------------------------------------- hit targets */
+
+    /*
+     * Every point in the field is a target, tested in screen space against the
+     * same projection the labels use. Raycasting a `Points` cloud would need a
+     * per-pixel threshold that changes with distance; projecting the seventeen
+     * known points costs nothing and answers in the units a finger works in.
+     *
+     * The lens pass displaces what is drawn near the hole, so the hit radius is
+     * generous enough to cover the few pixels of smear at the rim.
+     */
+    const wallNames = new Map(
+      constellation.anchors.map((anchor) => [anchor.id.replace("anchor:", ""), anchor.label]),
+    );
+
+    type Target = {
+      id: string;
+      label: string;
+      kind: "wall" | "surface";
+      cluster: string;
+      point: THREE.Vector3;
+    };
+
+    const targets: Target[] = [
+      ...constellation.anchors.map((anchor) => ({
+        id: anchor.id,
+        label: anchor.label,
+        kind: "wall" as const,
+        cluster: anchor.id.replace("anchor:", ""),
+        point: new THREE.Vector3(...anchor.position),
+      })),
+      ...constellation.stars.map((star) => ({
+        id: star.id,
+        label: star.label,
+        kind: "surface" as const,
+        cluster: star.cluster,
+        point: new THREE.Vector3(...star.position),
+      })),
+    ];
+
+    const focus = focusRef.current;
+    let ring: HTMLDivElement | null = null;
+    let card: HTMLDivElement | null = null;
+    let active: Target | null = null;
+    let cardHeight = 0;
+    if (focus) {
+      ring = document.createElement("div");
+      ring.className =
+        "pointer-events-none absolute left-0 top-0 h-9 w-9 rounded-full border border-primary/70 opacity-0 transition-opacity duration-150";
+      focus.appendChild(ring);
+
+      card = document.createElement("div");
+      card.className =
+        "absolute rounded-lg border border-border bg-background/95 p-4 text-left shadow-xl backdrop-blur transition-opacity duration-200";
+      card.style.opacity = "0";
+      card.style.pointerEvents = "none";
+      focus.appendChild(card);
+    }
+
+    const hideCard = () => {
+      active = null;
+      if (!card) return;
+      card.style.opacity = "0";
+      card.style.pointerEvents = "none";
+    };
+
+    const markRing = (sx: number, sy: number) => {
+      if (!ring) return;
+      ring.style.transform = `translate(${sx}px,${sy}px) translate(-50%,-50%)`;
+      ring.style.opacity = "1";
+    };
+
+    const clearRing = () => {
+      if (ring) ring.style.opacity = "0";
+    };
+
+    const showCard = (target: Target, sx: number, sy: number) => {
+      if (!card) return;
+      const siblings = constellation.stars.filter((star) => star.cluster === target.cluster);
+
+      card.replaceChildren();
+      const eyebrow = document.createElement("p");
+      eyebrow.className = "eyebrow";
+      eyebrow.textContent = target.kind === "wall" ? "Wall" : "Surface";
+
+      const heading = document.createElement("p");
+      heading.className = "mt-1.5 font-display text-sm font-semibold leading-snug";
+      heading.textContent = target.label;
+
+      const copy = document.createElement("p");
+      copy.className = "mt-1.5 text-xs leading-relaxed text-muted-foreground";
+      copy.textContent =
+        target.kind === "wall"
+          ? siblings.map((star) => star.label).join(" · ")
+          : `Part of ${wallNames.get(target.cluster) ?? target.cluster}`;
+
+      const link = document.createElement("a");
+      link.href = INTEGRATION_GUIDE_URL;
+      link.className =
+        "mt-3 inline-block text-xs text-primary underline decoration-primary/40 underline-offset-4 transition-colors hover:decoration-primary";
+      link.textContent = "Integration guide →";
+      // A plain href would reload the whole app; the band is a client route away
+      // from the guide, so hand it to the router instead.
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        navigateRef.current(INTEGRATION_GUIDE_URL);
+      });
+
+      card.append(eyebrow, heading, copy, link);
+
+      active = target;
+      const rect = canvas.getBoundingClientRect();
+      card.style.width = `${Math.min(272, rect.width - 32)}px`;
+      card.style.opacity = "1";
+      card.style.pointerEvents = "auto";
+      // Measured once when the content lands, then reused: reading the height
+      // on every frame would force a layout inside the render loop.
+      cardHeight = card.offsetHeight;
+      placeActive(sx, sy);
+    };
+
+    /** Keeps the ring on the point and the card beside it as the camera moves. */
+    const placeActive = (sx: number, sy: number) => {
+      if (!card) return;
+      const rect = canvas.getBoundingClientRect();
+      if (ring) {
+        ring.style.transform = `translate(${sx}px,${sy}px) translate(-50%,-50%)`;
+        ring.style.opacity = "1";
+      }
+
+      const width = Math.min(272, rect.width - 32);
+      const height = cardHeight || card.offsetHeight;
+
+      let left = sx + 20;
+      let top = sy + 20;
+      if (left + width > rect.width - 16) left = sx - width - 20;
+      if (top + height > rect.height - 16) top = sy - height - 20;
+      card.style.left = `${Math.max(16, left)}px`;
+      card.style.top = `${Math.max(16, top)}px`;
+    };
+
+    const probe = new THREE.Vector3();
+    const hitTest = (clientX: number, clientY: number, touch: boolean) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      const reach = touch ? 26 : 16;
+      let best: Target | null = null;
+      let bestDistance = Infinity;
+      let bestX = 0;
+      let bestY = 0;
+      for (const target of targets) {
+        probe.copy(target.point).project(camera);
+        if (probe.z >= 1) continue;
+        const px = ((probe.x + 1) / 2) * rect.width;
+        const py = ((1 - probe.y) / 2) * rect.height;
+        const distance = Math.hypot(px - x, py - y);
+        // Walls are drawn larger than surfaces, so they get the wider reach and
+        // win a near-tie against a surface sitting just beside them.
+        if (distance > (target.kind === "wall" ? reach * 1.6 : reach)) continue;
+        if (distance >= bestDistance) continue;
+        best = target;
+        bestDistance = distance;
+        bestX = px;
+        bestY = py;
+      }
+      return best ? { target: best, sx: bestX, sy: bestY } : null;
+    };
+
+    /** Re-projects the open target so the card stays pinned to its point. */
+    const trackActive = () => {
+      if (!active) return;
+      const rect = canvas.getBoundingClientRect();
+      probe.copy(active.point).project(camera);
+      if (probe.z >= 1) {
+        hideCard();
+        return;
+      }
+      placeActive(((probe.x + 1) / 2) * rect.width, ((1 - probe.y) / 2) * rect.height);
     };
 
     /* --------------------------------------------------------- lensing pass */
@@ -445,7 +663,12 @@ export function ConstellationSky() {
       if (lensPoint.z > 1 || Math.abs(lensPoint.x) > 1.45 || Math.abs(lensPoint.y) > 1.45) {
         return null;
       }
-      const shape = lensGeometry(SHADOW_RADIUS, distance, camera.fov, camera.aspect);
+      const shape = lensGeometry(
+        SHADOW_RADIUS * holeScale,
+        distance,
+        camera.fov,
+        camera.aspect,
+      );
       return {
         x: (lensPoint.x + 1) / 2,
         // The pass samples a quad whose uv has y = 0 at the bottom, same as NDC.
@@ -512,6 +735,9 @@ export function ConstellationSky() {
 
       // Labels follow the camera, so they are placed after the controls settle.
       placeLabels();
+      // An open card is anchored to a world point, so it has to follow the same
+      // camera as the labels or it detaches the moment the sky is dragged.
+      trackActive();
 
       const aim = aimLens();
       if (aim) {
@@ -587,8 +813,16 @@ export function ConstellationSky() {
      * the value is set here rather than on the first move.
      */
     let downInside = false;
+    // A press that never travels is a tap: the sky treats it as a click on
+    // whatever it started over. A press that travels is a drag, and a drag must
+    // not open a card on release.
+    let downAt = { x: 0, y: 0 };
+    let dragged = false;
+
     const onPointerDown = (event: PointerEvent) => {
       downInside = inGestureZone(event.clientX, event.clientY);
+      downAt = { x: event.clientX, y: event.clientY };
+      dragged = false;
       controls.enabled = downInside;
       canvas.style.touchAction = downInside ? "none" : "pan-y";
       if (downInside) {
@@ -599,7 +833,26 @@ export function ConstellationSky() {
       }
     };
 
-    const releaseGesture = () => {
+    const releaseGesture = (event: PointerEvent) => {
+      canvas.style.touchAction = "pan-y";
+      canvas.style.cursor = "grab";
+      downInside = false;
+      const travel = Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y);
+      if (dragged || travel > 8) return;
+      const hit = hitTest(event.clientX, event.clientY, event.pointerType !== "mouse");
+      if (hit) {
+        markRing(hit.sx, hit.sy);
+        showCard(hit.target, hit.sx, hit.sy);
+      } else {
+        hideCard();
+        clearRing();
+      }
+    };
+
+    /** `pointercancel` is the browser taking the gesture back, never a tap. */
+    const cancelGesture = () => {
+      downInside = false;
+      dragged = false;
       canvas.style.touchAction = "pan-y";
       canvas.style.cursor = "grab";
     };
@@ -609,15 +862,30 @@ export function ConstellationSky() {
     };
 
     const onPointerMove = (event: PointerEvent) => {
-      if (event.pointerType === "mouse") {
-        canvas.style.cursor = inGestureZone(event.clientX, event.clientY) ? "grab" : "default";
+      // A press that is still down is a drag, not a hover: leave the cursor
+      // alone and remember that this gesture was not a tap.
+      if (event.buttons) {
+        if (downInside) dragged = true;
+        return;
       }
+      if (event.pointerType !== "mouse") return;
+      const hit = hitTest(event.clientX, event.clientY, false);
+      canvas.style.cursor = hit
+        ? "pointer"
+        : inGestureZone(event.clientX, event.clientY)
+          ? "grab"
+          : "default";
+    };
+
+    const onPointerLeave = () => {
+      canvas.style.cursor = "grab";
     };
 
     canvas.addEventListener("pointerdown", onPointerDown, true);
     canvas.addEventListener("pointerup", releaseGesture);
-    canvas.addEventListener("pointercancel", releaseGesture);
+    canvas.addEventListener("pointercancel", cancelGesture);
     canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerleave", onPointerLeave);
     canvas.addEventListener("touchmove", onTouchMove, { passive: false });
 
     // Reduced motion slows the sky instead of stopping it, matching the hole's
@@ -670,10 +938,13 @@ export function ConstellationSky() {
       reducedQuery.removeEventListener("change", onReducedMotion);
       canvas.removeEventListener("pointerdown", onPointerDown, true);
       canvas.removeEventListener("pointerup", releaseGesture);
-      canvas.removeEventListener("pointercancel", releaseGesture);
+      canvas.removeEventListener("pointercancel", cancelGesture);
       canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("touchmove", onTouchMove);
       labelEls.forEach((el) => el.remove());
+      ring?.remove();
+      card?.remove();
       controls.dispose();
       hole.dispose();
       lensPass?.dispose();
@@ -690,8 +961,9 @@ export function ConstellationSky() {
       <div
         ref={labelsRef}
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 hidden overflow-hidden lg:block"
+        className="pointer-events-none absolute inset-0 overflow-hidden"
       />
+      <div ref={focusRef} className="pointer-events-none absolute inset-0 z-10" />
     </>
   );
 }

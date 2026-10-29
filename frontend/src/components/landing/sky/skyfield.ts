@@ -15,6 +15,8 @@ export type Vec3 = [number, number, number];
 export interface SkyAnchor {
   id: string;
   label: string;
+  /** A phone's frame cannot hold the full wall name beside its node. */
+  short: string;
   position: Vec3;
 }
 
@@ -36,22 +38,28 @@ export const WALLS = [
   {
     id: "isolate",
     label: "Isolate the blast radius",
+    short: "Isolate",
     surfaces: ["SQL surface", "Files", "Gallery", "Shares"],
   },
   {
     id: "human",
     label: "Keep deletion human",
+    short: "Human deletion",
     surfaces: ["API keys", "Vault relay", "MFA", "Audit log", "OAuth 2.1"],
   },
   {
     id: "compute",
     label: "Move compute off the control plane",
+    short: "Move compute",
     surfaces: ["Analytics", "Hybrid RAG", "Graph", "Epistemic ledger", "Jobs and ops"],
   },
 ] as const;
 
 /** The ring the clusters sit on. */
 const ORBIT_RADIUS = 5.6;
+/** A phone's frame is narrow, so the ring and the stars around it are pulled in
+ *  until the whole field fits between the two edges. */
+const ORBIT_RADIUS_COMPACT = 3.9;
 /** Turned so the wall with the longest label hangs below the disk rather than
  *  across its bright face: the ring's first wall sits upper right, the second
  *  upper left, and the third at the bottom. */
@@ -59,6 +67,8 @@ const ORBIT_PHASE = Math.PI / 6;
 /** The ring is an ellipse, squashed vertically so three walls fit inside the
  *  band without the lowest one falling out of frame. */
 const ORBIT_SQUASH = 0.45;
+/** A phone's band is close to square, so the ring can stand up into a triangle. */
+const ORBIT_SQUASH_COMPACT = 0.62;
 
 /** FNV-1a over a string, in [0,1). Stable across runs and platforms. */
 export function hash(input: string): number {
@@ -74,17 +84,21 @@ export function anchorId(wall: string): string {
   return `anchor:${wall}`;
 }
 
-/** The centre of one wall's cluster. `compact` pulls the ring in for a phone.
+/** The centre of one wall's cluster. `compact` pulls the whole ring in for a
+ *  phone: the frame is 390px wide, so the desktop radius would carry the outer
+ *  clusters off both edges.
  *
  *  The ring is squashed vertically rather than left circular: the band is wider
- *  than it is tall, so a circle would push the lower wall out of frame.
+ *  than it is tall, so a circle would push the lower wall out of frame. A phone's
+ *  band is close to square, so it gets less squash and the three walls read as a
+ *  triangle around the hole rather than one flat line over it.
  */
 function anchorPosition(index: number, compact: boolean): Vec3 {
   const angle = (index / WALLS.length) * Math.PI * 2 + ORBIT_PHASE;
-  const radius = ORBIT_RADIUS * (compact ? 0.72 : 1);
+  const radius = compact ? ORBIT_RADIUS_COMPACT : ORBIT_RADIUS;
   return [
     Math.cos(angle) * radius,
-    Math.sin(angle) * radius * ORBIT_SQUASH * (compact ? 0.8 : 1),
+    Math.sin(angle) * radius * (compact ? ORBIT_SQUASH_COMPACT : ORBIT_SQUASH),
     Math.sin(angle) * radius * 0.18,
   ];
 }
@@ -101,9 +115,14 @@ export function buildSky(compact = false): {
 
   WALLS.forEach((wall, index) => {
     const centre = anchorPosition(index, compact);
-    anchors.push({ id: anchorId(wall.id), label: wall.label, position: centre });
+    anchors.push({
+      id: anchorId(wall.id),
+      label: wall.label,
+      short: wall.short,
+      position: centre,
+    });
 
-    const spread = (1.5 + wall.surfaces.length * 0.3) * (compact ? 0.78 : 1);
+    const spread = (1.5 + wall.surfaces.length * 0.3) * (compact ? 0.9 : 1);
     wall.surfaces.forEach((surface, i) => {
       const id = `${wall.id}/${surface}`;
       // Golden angle, so a wall's surfaces fan out instead of bunching on one side.
