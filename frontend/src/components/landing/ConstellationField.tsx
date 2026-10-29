@@ -19,8 +19,11 @@ export function ConstellationField() {
       <div className="relative h-[60vh] min-h-[380px] w-full lg:h-[78vh]">
         <ConstellationSky />
 
+        {/* On desktop the copy is a left column, so the scrim runs left to right.
+            On a phone the copy sits at the bottom, and a side scrim would wash out
+            a third of the sky for nothing. */}
         <div
-          className="pointer-events-none absolute inset-0 bg-gradient-to-r from-background via-background/50 to-transparent lg:from-background lg:via-background/25 lg:to-transparent"
+          className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent lg:bg-gradient-to-r lg:from-background lg:via-background/25 lg:to-transparent"
           aria-hidden="true"
         />
         <div
