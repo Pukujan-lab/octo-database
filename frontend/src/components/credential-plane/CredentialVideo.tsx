@@ -99,8 +99,9 @@ export function CredentialVideo() {
     if (soundChoice.current !== null) return;
     const unlock = () => {
       const video = videoRef.current;
-      if (!video || soundChoice.current !== null || video.paused) return;
+      if (!video || soundChoice.current !== null) return;
       video.muted = false;
+      soundChoice.current = true;
       setSoundOn(true);
     };
     const opts = { once: true, passive: true } as const;
@@ -150,10 +151,9 @@ export function CredentialVideo() {
         src={VIDEO_SRC}
         poster={POSTER_SRC}
         playsInline
-        muted
         loop
         preload="metadata"
-        aria-label="Ninety seconds: give it everything, hand it nothing."
+        aria-label="One hundred seconds: give it everything, hand it nothing."
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onError={() => {
