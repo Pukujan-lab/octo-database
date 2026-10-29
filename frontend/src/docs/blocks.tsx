@@ -107,11 +107,11 @@ export function Exchange({
 }) {
   return (
     <div className="my-5 grid gap-3 lg:grid-cols-2">
-      <div>
+      <div className="min-w-0">
         <p className="eyebrow mb-1.5">{requestLabel}</p>
         <CodeBlock code={request.code} label={request.label ?? "HTTP"} caption={request.caption} />
       </div>
-      <div>
+      <div className="min-w-0">
         <p className="eyebrow mb-1.5">{responseLabel}</p>
         <CodeBlock code={response.code} label={response.label ?? "JSON"} caption={response.caption} />
       </div>
