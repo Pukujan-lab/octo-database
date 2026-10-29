@@ -155,7 +155,13 @@ export interface EndpointRow {
 export function EndpointTable({ rows }: { rows: EndpointRow[] }) {
   return (
     <div className="my-5 overflow-x-auto rounded-lg border border-border">
-      <table className="w-full min-w-[42rem] border-collapse text-left text-xs">
+      <table className="w-full min-w-[46rem] table-fixed border-collapse text-left text-xs">
+        <colgroup>
+          <col className="w-[21%]" />
+          <col className="w-[30%]" />
+          <col className="w-[8%]" />
+          <col className="w-[41%]" />
+        </colgroup>
         <thead>
           <tr className="border-b border-border bg-muted/60">
             <th className="px-3 py-2 font-display text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -177,15 +183,15 @@ export function EndpointTable({ rows }: { rows: EndpointRow[] }) {
             <tr key={`${row.method} ${row.path}`} className="border-b border-border/60 last:border-b-0">
               <td className="px-3 py-2.5 align-top">
                 {row.action ? (
-                  <code className="font-mono text-[11px] text-foreground">{row.action}</code>
+                  <code className="break-words font-mono text-[11px] text-foreground">{row.action}</code>
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}
               </td>
               <td className="px-3 py-2.5 align-top">
-                <div className="flex items-start gap-2">
+                <div className="flex min-w-0 items-start gap-2">
                   <MethodChip method={row.method} />
-                  <code className="break-all font-mono text-[11px] text-foreground">{row.path}</code>
+                  <code className="min-w-0 break-words font-mono text-[11px] text-foreground">{row.path}</code>
                 </div>
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 align-top text-[11px] text-muted-foreground">
