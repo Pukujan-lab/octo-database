@@ -15,6 +15,7 @@ import { FilesView } from "@/views/FilesView";
 import { GalleryView } from "@/views/GalleryView";
 import { OperationsView } from "@/views/OperationsView";
 import { AnalyticsView } from "@/views/AnalyticsView";
+import { ServicesView } from "@/views/ServicesView";
 import { AccessView } from "@/views/AccessView";
 import { VaultView } from "@/views/VaultView";
 import type { DeleteWorkspaceResult } from "@/lib/types";
@@ -165,6 +166,7 @@ export default function Index() {
             {view === "gallery" ? <GalleryView workspaceId={workspace.id} data={data} /> : null}
             {view === "operations" ? <OperationsView workspaceId={workspace.id} data={data} /> : null}
             {view === "analytics" ? <AnalyticsView workspaceId={workspace.id} /> : null}
+            {view === "services" ? <ServicesView /> : null}
             {view === "access" ? (
               <AccessView
                 workspace={workspace}
