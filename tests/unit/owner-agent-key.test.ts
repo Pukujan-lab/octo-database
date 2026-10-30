@@ -4,6 +4,8 @@ vi.mock('../../src/server/db', () => ({
   bindRequestIdentity: vi.fn(),
   dbGetWorkspaceMembership: vi.fn(),
   dbResolveShareById: vi.fn(),
+  dbRecordKeyUse: vi.fn(async () => ({ newIp: false, firstAlertThisHour: false })),
+  dbFindDeadApiKey: vi.fn(async () => null),
   dbVerifyApiKey: vi.fn(async () => ({
     keyId: 'key-owner-agent',
     principalId: 'p1',
