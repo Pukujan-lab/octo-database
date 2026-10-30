@@ -53,6 +53,8 @@ describe('Octo MCP adapter', () => {
       'graph_health',
       'guide',
       'ingest_document',
+      'list_analytics_schedules',
+      'list_analytics_specs',
       'list_documents',
       'list_files',
       'list_ops_events',
@@ -67,9 +69,11 @@ describe('Octo MCP adapter', () => {
       'query_workspace',
       'query_workspace_database',
       'record_epistemic',
+      'register_analytics_spec',
       'register_dataset',
       'rename_document',
       'retry_job',
+      'schedule_analytics',
       'upload_file',
       'whoami',
     ]);
@@ -469,5 +473,42 @@ describe('Octo MCP tool surface', () => {
   it('returns compact JSON', async () => {
     const client = await connect(apiWith(200, '{"a":1}'));
     expect(textOf(await client.callTool({ name: 'whoami', arguments: {} }))).toBe('{"a":1}');
+  });
+});
+
+describe('Octo MCP analytics tools', () => {
+  it('registers a spec and schedules it through the analytics routes', async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const fetchImpl = (async (url: unknown, init?: { method?: string; body?: string }) => {
+      calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body ? JSON.parse(init.body) : undefined });
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    const client = await connect(new OctoApi({ baseUrl: 'http://octo.test', token: 'octo_live_acc_test', fetchImpl }));
+
+    await client.callTool({
+      name: 'register_analytics_spec',
+      arguments: { workspaceId: 'ws-1', slug: 'err', dataset: 'log', sql: 'SELECT 1 AS n', params: [] },
+    });
+    await client.callTool({
+      name: 'schedule_analytics',
+      arguments: {
+        workspaceId: 'ws-1',
+        spec: 'ws:err@1',
+        dataset: 'log',
+        everyMinutes: 60,
+        sink: { table: 'err_by_hour', mode: 'replace' },
+      },
+    });
+    await client.callTool({
+      name: 'query_dataset',
+      arguments: { workspaceId: 'ws-1', dataset: 'log', querySpec: 'ws:err@1', params: { since: '2026-01-01' } },
+    });
+
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      'POST http://octo.test/api/workspaces/ws-1/analytics/specs',
+      'POST http://octo.test/api/workspaces/ws-1/analytics/schedules',
+      'POST http://octo.test/api/workspaces/ws-1/analytics/queries',
+    ]);
+    expect(calls[2]!.body).toEqual({ dataset: 'log', querySpec: 'ws:err@1', params: { since: '2026-01-01' } });
   });
 });

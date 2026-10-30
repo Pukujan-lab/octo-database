@@ -275,6 +275,7 @@ export class OctoApi {
     provenance: Record<string, unknown>;
     watermark?: string;
     idempotencyKey?: string;
+    append?: boolean;
     parts: Array<{ partition: string; dataBase64: string }>;
   }): Promise<unknown> {
     return this.request(
@@ -288,6 +289,7 @@ export class OctoApi {
         provenance: input.provenance,
         ...(input.watermark === undefined ? {} : { watermark: input.watermark }),
         ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+        ...(input.append === undefined ? {} : { append: input.append }),
         parts: input.parts,
       }
     );
@@ -295,19 +297,54 @@ export class OctoApi {
 
   submitAnalyticsQuery(input: {
     workspaceId: string;
-    datasetVersionId: string;
+    datasetVersionId?: string;
+    dataset?: string;
     querySpec: string;
+    params?: Record<string, unknown>;
     idempotencyKey?: string;
   }): Promise<unknown> {
     return this.request(
       'POST',
       `/api/workspaces/${encodeURIComponent(input.workspaceId)}/analytics/queries`,
       {
-        datasetVersionId: input.datasetVersionId,
+        ...(input.datasetVersionId === undefined ? {} : { datasetVersionId: input.datasetVersionId }),
+        ...(input.dataset === undefined ? {} : { dataset: input.dataset }),
         querySpec: input.querySpec,
+        ...(input.params === undefined ? {} : { params: input.params }),
         ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
       }
     );
+  }
+
+  registerAnalyticsSpec(input: {
+    workspaceId: string;
+    slug: string;
+    dataset: string;
+    sql: string;
+    params?: Array<{ name: string; type: string }>;
+  }): Promise<unknown> {
+    const { workspaceId, ...body } = input;
+    return this.request('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/analytics/specs`, body);
+  }
+
+  listAnalyticsSpecs(input: { workspaceId: string }): Promise<unknown> {
+    return this.request('GET', `/api/workspaces/${encodeURIComponent(input.workspaceId)}/analytics/specs`);
+  }
+
+  createAnalyticsSchedule(input: {
+    workspaceId: string;
+    spec: string;
+    dataset: string;
+    params?: Record<string, unknown>;
+    everyMinutes: number;
+    sink: { table: string; mode: 'replace' | 'upsert'; keys?: string[] };
+  }): Promise<unknown> {
+    const { workspaceId, ...body } = input;
+    return this.request('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/analytics/schedules`, body);
+  }
+
+  listAnalyticsSchedules(input: { workspaceId: string }): Promise<unknown> {
+    return this.request('GET', `/api/workspaces/${encodeURIComponent(input.workspaceId)}/analytics/schedules`);
   }
 
   getAnalyticsQueryStatus(input: { workspaceId: string; jobId: string }): Promise<unknown> {
