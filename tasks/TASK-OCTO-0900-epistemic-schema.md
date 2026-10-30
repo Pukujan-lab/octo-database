@@ -1,11 +1,11 @@
 # OCTO-0900 Epistemic workspace with bitemporal claims, beliefs, and evidence
 
-<!-- continuity:task {"acceptance":["PostgreSQL canonical epistemic schema for entities, claims, perspectives, beliefs, evidence, and relations","two independent time axes: valid time and recorded time","a claim recorded at T1, qualified at T2, and superseded at T3 retains its full history","a query answers what a perspective believed at an instant, applying both time axes","two perspectives can hold different belief states for the same claim","deleting derived beliefs does not destroy claim, evidence, or provenance records","cross-workspace epistemic rows are never returned to another workspace"],"depends_on":["OCTO-0200"],"goal":"Represent changing knowledge without overwriting history, with PostgreSQL as the canonical epistemic ledger","id":"OCTO-0900","issue_url":"https://github.com/Pukujan/octo-database/issues/11","next_action":"Merged in PR #34 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Let projects distinguish what was believed when from what is now considered true then."} -->
+<!-- continuity:task {"acceptance":["PostgreSQL canonical epistemic schema for entities, claims, perspectives, beliefs, evidence, and relations","two independent time axes: valid time and recorded time","a claim recorded at T1, qualified at T2, and superseded at T3 retains its full history","a query answers what a perspective believed at an instant, applying both time axes","two perspectives can hold different belief states for the same claim","deleting derived beliefs does not destroy claim, evidence, or provenance records","cross-workspace epistemic rows are never returned to another workspace"],"depends_on":["OCTO-0200"],"goal":"Represent changing knowledge without overwriting history, with PostgreSQL as the canonical epistemic ledger","id":"OCTO-0900","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/11","next_action":"Merged in PR #34 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P2","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Let projects distinguish what was believed when from what is now considered true then."} -->
 
 - Status: completed
 - Priority: P2
 - Branch: `task/OCTO-0900-epistemic-schema`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/11
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/11
 
 ## Goal
 

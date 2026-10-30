@@ -1,7 +1,7 @@
 # Secret storage — context pack
 
 **Date:** 2026-10-08 · **Status:** briefing for a planning agent. Research only. Nothing here authorizes implementation, and no design is decided.
-**Owning issue:** [#92](https://github.com/Pukujan/octo-database/issues/92) — "Future feature: built-in secret storage (secret boxes, rotatable, decoy and bi-temporal keys)".
+**Owning issue:** [#92](https://github.com/Pukujan-lab/octo-database/issues/92) — "Future feature: built-in secret storage (secret boxes, rotatable, decoy and bi-temporal keys)".
 
 Octo is a self-hosted control plane for workspaces, files, and agents, running on a Linux host called gravebuster. This pack is the briefing for deciding how Octo should handle secrets.
 

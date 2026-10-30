@@ -1,11 +1,11 @@
 # OCTO-0700 Scoped agent identities and capability discovery
 
-<!-- continuity:task {"acceptance":["agent token is minted with explicit scopes and a workspace binding","capability discovery describes how to call Octo, filtered to the token's granted scopes","a read-only token can list and read allowed workspace files","a read-only token cannot delete or upload (403)","a token cannot enter another workspace (403)","no provider, database, or infrastructure credential is disclosed","agent actions produce attributable audit records","revocation takes effect immediately and unknown scopes are rejected at mint time"],"depends_on":["OCTO-0200","OCTO-0600"],"goal":"Give agents scoped machine identities that use the same Octo platform boundary as human apps","id":"OCTO-0700","issue_url":"https://github.com/Pukujan/octo-database/issues/9","next_action":"Merged in PR #33 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Let automation act through Octo without ever holding infrastructure master credentials."} -->
+<!-- continuity:task {"acceptance":["agent token is minted with explicit scopes and a workspace binding","capability discovery describes how to call Octo, filtered to the token's granted scopes","a read-only token can list and read allowed workspace files","a read-only token cannot delete or upload (403)","a token cannot enter another workspace (403)","no provider, database, or infrastructure credential is disclosed","agent actions produce attributable audit records","revocation takes effect immediately and unknown scopes are rejected at mint time"],"depends_on":["OCTO-0200","OCTO-0600"],"goal":"Give agents scoped machine identities that use the same Octo platform boundary as human apps","id":"OCTO-0700","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/9","next_action":"Merged in PR #33 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Let automation act through Octo without ever holding infrastructure master credentials."} -->
 
 - Status: completed
 - Priority: P1
 - Branch: `task/OCTO-0700-agent-capabilities`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/9
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/9
 
 ## Goal
 

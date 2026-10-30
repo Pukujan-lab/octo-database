@@ -1,6 +1,6 @@
 # Octo UI direction
 
-Owner correction recorded on [issue #74](https://github.com/Pukujan/octo-database/issues/74#issuecomment-5965479948), 2026-10-03.
+Owner correction recorded on [issue #74](https://github.com/Pukujan-lab/octo-database/issues/74#issuecomment-5965479948), 2026-10-03.
 
 ## Product surface
 

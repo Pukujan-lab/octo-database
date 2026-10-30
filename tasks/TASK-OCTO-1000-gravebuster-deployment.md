@@ -1,11 +1,11 @@
 # OCTO-1000 Host Octo on gravebuster with a production branch and gated CI/CD
 
-<!-- continuity:task {"acceptance":["octodb.design-bakery.com serves the Octo UI over HTTPS","Google sign-in completes and lands on an authenticated dashboard","guest login still works","a merge to main does not deploy; a merge to production deploys within 5 minutes","a failing smoke test rolls back to the previous image automatically","gates runs on pull requests into both main and production","no secret is committed to the repository"],"depends_on":["OCTO-0100"],"goal":"Host Octo's frontend and backend as containers on gravebuster with a gated promotion path to production","id":"OCTO-1000","issue_url":"https://github.com/Pukujan/octo-database/issues/43","next_action":"Create pull request with auto-merge to main for deployment hardening fixes.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"Octo has no hosted instance and no delivery path from a merged commit to a running service."} -->
+<!-- continuity:task {"acceptance":["octodb.design-bakery.com serves the Octo UI over HTTPS","Google sign-in completes and lands on an authenticated dashboard","guest login still works","a merge to main does not deploy; a merge to production deploys within 5 minutes","a failing smoke test rolls back to the previous image automatically","gates runs on pull requests into both main and production","no secret is committed to the repository"],"depends_on":["OCTO-0100"],"goal":"Host Octo's frontend and backend as containers on gravebuster with a gated promotion path to production","id":"OCTO-1000","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/43","next_action":"Create pull request with auto-merge to main for deployment hardening fixes.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"active","why":"Octo has no hosted instance and no delivery path from a merged commit to a running service."} -->
 
 - Status: active
 - Priority: P1
 - Branch: `task/OCTO-1000-gravebuster-hosting`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/43
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/43
 - Design spec: `docs/superpowers/specs/2026-10-01-octo-gravebuster-deployment-design.md`
 
 ## Goal

@@ -1,7 +1,7 @@
 # Control-plane adoption research
 
 **Date:** 2026-10-02 · **Status:** Research checkpoint; recommendations below do not authorize a migration.
-**Issue:** [octo-database #72](https://github.com/Pukujan/octo-database/issues/72)
+**Issue:** [octo-database #72](https://github.com/Pukujan-lab/octo-database/issues/72)
 
 ## What this research answers
 

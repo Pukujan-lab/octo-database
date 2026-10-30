@@ -1,11 +1,11 @@
 # OCTO-0600 Operations page, jobs, and activity
 
-<!-- continuity:task {"acceptance":["Postgres-backed job table with an explicit monotonic state machine","duplicate idempotency key returns the original job instead of creating a second","a worker that dies mid-job leaves a lease that expires, and the job converges on restart","no duplicate side effect when a worker crashes after the side effect but before completion","retry exhaustion terminates the job with an inspectable error summary","operations page shows job state, attempt count, error summary, and recent activity","unauthorized workspace job access is denied"],"depends_on":["OCTO-0300","OCTO-0400"],"goal":"Give background work durable job identity, retry semantics, and an operations page","id":"OCTO-0600","issue_url":"https://github.com/Pukujan/octo-database/issues/8","next_action":"Merged in PR #31 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Make thumbnails and later archive/agent jobs observable and retryable without ad-hoc process logs."} -->
+<!-- continuity:task {"acceptance":["Postgres-backed job table with an explicit monotonic state machine","duplicate idempotency key returns the original job instead of creating a second","a worker that dies mid-job leaves a lease that expires, and the job converges on restart","no duplicate side effect when a worker crashes after the side effect but before completion","retry exhaustion terminates the job with an inspectable error summary","operations page shows job state, attempt count, error summary, and recent activity","unauthorized workspace job access is denied"],"depends_on":["OCTO-0300","OCTO-0400"],"goal":"Give background work durable job identity, retry semantics, and an operations page","id":"OCTO-0600","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/8","next_action":"Merged in PR #31 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Make thumbnails and later archive/agent jobs observable and retryable without ad-hoc process logs."} -->
 
 - Status: completed
 - Priority: P1
 - Branch: `task/OCTO-0600-operations-page`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/8
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/8
 
 ## Goal
 
