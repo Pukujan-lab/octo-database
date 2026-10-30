@@ -18,16 +18,8 @@ import {
   isValidPartition,
 } from './paths';
 import { analyticsEngineStatus, inspectParquetFile, prepareJobDirectory, removeJobDirectory } from './engine';
-import {
-  carriesSpecInputs,
-  getQuerySpec,
-  schemaMatchesDeclared,
-  validateDeclaredSchema,
-} from './specs';
+import { schemaMatchesDeclared, validateDeclaredSchema } from './specs';
 import type { ColumnSpec, DatasetVersionRecord } from '../types/analytics';
-
-/** The accepted spec every dataset must be able to answer in this slice. */
-const REQUIRED_SPEC = 'job-failures-by-type-month@1';
 
 export interface RegisterVersionInput {
   workspaceId: string;
@@ -118,16 +110,6 @@ export async function registerDatasetVersion(
   const schemaError = validateDeclaredSchema(schema);
   if (schemaError) return bad(schemaError);
   const declared = schema!;
-
-  const spec = getQuerySpec(REQUIRED_SPEC)!;
-  if (!carriesSpecInputs(declared, spec)) {
-    return {
-      ok: false,
-      http: 400,
-      error: 'SCHEMA_MISMATCH',
-      message: `schema must include ${spec.inputColumns.map((c) => `${c.name} ${c.type}`).join(', ')}`,
-    };
-  }
 
   const provenance = body['provenance'];
   if (

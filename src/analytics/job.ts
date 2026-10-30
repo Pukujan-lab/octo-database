@@ -11,14 +11,21 @@ import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ObjectStore } from '../storage/object-store';
-import { analyticsEngineStatus, prepareJobDirectory, removeJobDirectory, runSpecOverParquetFiles } from './engine';
+import {
+  analyticsEngineStatus,
+  prepareJobDirectory,
+  removeJobDirectory,
+  runSpecOverParquetFiles,
+  runWorkspaceSql,
+} from './engine';
 import { assertWorkspaceKey, resultObjectKey } from './paths';
-import { carriesSpecInputs, getQuerySpec } from './specs';
-import type { DatasetVersionRecord } from '../types/analytics';
+import { carriesSpecInputs, coerceParams, getQuerySpec, parseWorkspaceSpecId } from './specs';
+import type { DatasetVersionRecord, WorkspaceSpecRecord } from '../types/analytics';
 
 export interface AnalyticsJobDeps {
   store: ObjectStore;
   loadVersion: (workspaceId: string, datasetVersionId: string) => Promise<DatasetVersionRecord | null>;
+  loadWorkspaceSpec: (workspaceId: string, slug: string, version: number) => Promise<WorkspaceSpecRecord | null>;
   registerResult: (input: {
     workspaceId: string;
     datasetVersionId: string;
@@ -55,14 +62,25 @@ export async function runAnalyticsJob(
     return failure('INVALID_PAYLOAD', 'analytics job payload must carry datasetVersionId, querySpec, and resultId');
   }
 
-  const spec = getQuerySpec(querySpec);
-  if (!spec) return failure('INVALID_PAYLOAD', `unknown query spec ${querySpec}`);
+  const workspaceRef = parseWorkspaceSpecId(querySpec);
+  const spec = workspaceRef ? null : getQuerySpec(querySpec);
+  if (!workspaceRef && !spec) return failure('INVALID_PAYLOAD', `unknown query spec ${querySpec}`);
+
+  let workspaceSpec: WorkspaceSpecRecord | null = null;
+  let paramValues: Record<string, string | number | boolean> = {};
+  if (workspaceRef) {
+    workspaceSpec = await deps.loadWorkspaceSpec(job.workspaceId, workspaceRef.slug, workspaceRef.version);
+    if (!workspaceSpec) return failure('SPEC_NOT_FOUND', `spec ${querySpec} is not in this workspace`);
+    const coerced = coerceParams(workspaceSpec.params, job.payload['params']);
+    if (!coerced.ok) return failure('INVALID_PAYLOAD', coerced.message);
+    paramValues = coerced.values;
+  }
 
   const version = await deps.loadVersion(job.workspaceId, datasetVersionId);
   if (!version) {
     return failure('DATASET_VERSION_NOT_FOUND', `dataset version ${datasetVersionId} is not in this workspace`);
   }
-  if (!carriesSpecInputs(version.schema, spec)) {
+  if (spec && !carriesSpecInputs(version.schema, spec)) {
     return failure('SCHEMA_MISMATCH', `dataset version ${datasetVersionId} no longer carries the spec inputs`);
   }
 
@@ -82,12 +100,18 @@ export async function runAnalyticsJob(
       files.push(file);
     }
 
-    const run = await runSpecOverParquetFiles({
-      spec,
-      files,
-      outFile: path.join(dir, 'result.parquet'),
-      spillDir: path.join(dir, 'spill'),
-    });
+    const outFile = path.join(dir, 'result.parquet');
+    const spillDir = path.join(dir, 'spill');
+    const run = workspaceSpec
+      ? await runWorkspaceSql({
+          sql: workspaceSpec.sql,
+          params: workspaceSpec.params,
+          values: paramValues,
+          files,
+          outFile,
+          spillDir,
+        })
+      : await runSpecOverParquetFiles({ spec: spec!, files, outFile, spillDir });
     if (!run.ok) return run;
 
     const objectKey = resultObjectKey(job.workspaceId, resultId);

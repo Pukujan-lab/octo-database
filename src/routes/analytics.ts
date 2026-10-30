@@ -11,19 +11,29 @@
 
 import { randomUUID } from 'crypto';
 import { registerDatasetVersion } from '../analytics/registration';
-import { analyticsEngineStatus, readParquetRows } from '../analytics/engine';
-import { getQuerySpec } from '../analytics/specs';
-import { assertWorkspaceKey } from '../analytics/paths';
+import { analyticsEngineStatus, normalizeSpecSql, readParquetRows, validateWorkspaceSql } from '../analytics/engine';
+import { createHash } from 'crypto';
+import {
+  coerceParams,
+  getQuerySpec,
+  parseWorkspaceSpecId,
+  validateParamDecls
+} from '../analytics/specs';
+import { assertWorkspaceKey, DATASET_SLUG_PATTERN } from '../analytics/paths';
 import { authenticateRequest, keyWorkspaceMatches, requireScope, roleAllows, scopeDenied } from '../server/auth-context';
 import {
+  dbCreateWorkspaceSpec,
   dbEnqueueJob,
   dbGetAnalyticsJob,
   dbGetAnalyticsResult,
   dbGetAnalyticsResultByJob,
   dbGetDatasetVersion,
+  dbGetLatestDatasetVersion,
+  dbGetWorkspaceSpec,
   dbGetWorkspaceMembership,
   dbListAnalyticsRuns,
   dbListDatasets,
+  dbListWorkspaceSpecs,
   dbRegisterDatasetVersion,
 } from '../server/db';
 import { readJsonObject, requireUuid, sendJson } from '../server/http';
@@ -31,6 +41,7 @@ import { objectStore, r2Provider, UUID_PATTERN } from '../server/runtime';
 import { IncomingMessage, ServerResponse } from 'http';
 
 const REGISTER_PATH = /^\/api\/workspaces\/([^/]+)\/datasets$/;
+const SPECS_PATH = /^\/api\/workspaces\/([^/]+)\/analytics\/specs$/;
 const RUNS_PATH = /^\/api\/workspaces\/([^/]+)\/analytics\/runs$/;
 const QUERIES_PATH = /^\/api\/workspaces\/([^/]+)\/analytics\/queries$/;
 const QUERY_STATUS_PATH = /^\/api\/workspaces\/([^/]+)\/analytics\/queries\/([^/]+)$/;
@@ -129,6 +140,76 @@ export async function handleAnalyticsRoutes(
     return true;
   }
 
+  // Register a workspace query spec: POST /api/workspaces/:id/analytics/specs
+  const specsMatch = pathname.match(SPECS_PATH);
+  if (specsMatch && req.method === 'POST') {
+    const workspaceId = specsMatch[1]!;
+    const auth = await authorize(req, res, workspaceId, 'write');
+    if (!auth) return true;
+    if (!(await analyticsReady(res))) return true;
+
+    const body = await readJsonObject(req);
+    const slug = body['slug'];
+    const dataset = body['dataset'];
+    const sql = body['sql'];
+    const params = body['params'] ?? [];
+    if (typeof slug !== 'string' || !DATASET_SLUG_PATTERN.test(slug)) {
+      sendJson(res, 400, { error: 'BAD_REQUEST: slug must be a lowercase slug matching [a-z0-9-]' });
+      return true;
+    }
+    if (typeof dataset !== 'string' || !DATASET_SLUG_PATTERN.test(dataset)) {
+      sendJson(res, 400, { error: 'BAD_REQUEST: dataset must name a registered dataset slug' });
+      return true;
+    }
+    if (typeof sql !== 'string' || !sql.trim() || sql.length > 20000) {
+      sendJson(res, 400, { error: 'BAD_REQUEST: sql must be a non-empty string of at most 20000 characters' });
+      return true;
+    }
+    const paramError = validateParamDecls(params);
+    if (paramError) {
+      sendJson(res, 400, { error: `BAD_REQUEST: ${paramError}` });
+      return true;
+    }
+    const latest = await dbGetLatestDatasetVersion(workspaceId, dataset);
+    if (!latest) {
+      sendJson(res, 404, { error: 'DATASET_NOT_FOUND' });
+      return true;
+    }
+
+    const normalized = normalizeSpecSql(sql);
+    const problem = await validateWorkspaceSql({
+      sql: normalized,
+      params: params as Parameters<typeof validateWorkspaceSql>[0]['params'],
+      schema: latest.schema,
+    });
+    if (problem) {
+      sendJson(res, 400, { error: 'INVALID_SPEC', message: problem });
+      return true;
+    }
+
+    const spec = await dbCreateWorkspaceSpec({
+      workspaceId,
+      createdBy: auth.principal.id,
+      slug,
+      sql: normalized,
+      params: params as Parameters<typeof validateWorkspaceSql>[0]['params'],
+    });
+    if (!spec) {
+      sendJson(res, 409, { error: 'SPEC_VERSION_CONFLICT', message: 'a concurrent registration took this version; retry' });
+      return true;
+    }
+    sendJson(res, 201, { spec });
+    return true;
+  }
+
+  // List the workspace's query specs: GET /api/workspaces/:id/analytics/specs
+  if (specsMatch && req.method === 'GET') {
+    const workspaceId = specsMatch[1]!;
+    if (!(await authorize(req, res, workspaceId, 'read'))) return true;
+    sendJson(res, 200, { specs: await dbListWorkspaceSpecs(workspaceId) });
+    return true;
+  }
+
   // List recent analytics runs: GET /api/workspaces/:id/analytics/runs
   const runsMatch = pathname.match(RUNS_PATH);
   if (runsMatch && req.method === 'GET') {
@@ -153,7 +234,26 @@ export async function handleAnalyticsRoutes(
       sendJson(res, 400, { error: 'BAD_REQUEST: datasetVersionId must be a UUID' });
       return true;
     }
-    if (typeof querySpec !== 'string' || !getQuerySpec(querySpec)) {
+    if (typeof querySpec !== 'string') {
+      sendJson(res, 400, { error: 'UNKNOWN_QUERY_SPEC' });
+      return true;
+    }
+    // A workspace spec carries its own parameters; a built-in spec takes none.
+    let queryParams: Record<string, string | number | boolean> = {};
+    const workspaceRef = parseWorkspaceSpecId(querySpec);
+    if (workspaceRef) {
+      const spec = await dbGetWorkspaceSpec(workspaceId, workspaceRef.slug, workspaceRef.version);
+      if (!spec) {
+        sendJson(res, 404, { error: 'SPEC_NOT_FOUND' });
+        return true;
+      }
+      const coerced = coerceParams(spec.params, body['params']);
+      if (!coerced.ok) {
+        sendJson(res, 400, { error: `BAD_REQUEST: ${coerced.message}` });
+        return true;
+      }
+      queryParams = coerced.values;
+    } else if (!getQuerySpec(querySpec)) {
       sendJson(res, 400, { error: 'UNKNOWN_QUERY_SPEC' });
       return true;
     }
@@ -172,15 +272,18 @@ export async function handleAnalyticsRoutes(
       sendJson(res, 400, { error: 'BAD_REQUEST: idempotencyKey must be a non-empty string' });
       return true;
     }
+    const paramsDigest = Object.keys(queryParams).length
+      ? ':' + createHash('sha256').update(JSON.stringify(queryParams, Object.keys(queryParams).sort())).digest('hex').slice(0, 16)
+      : '';
     const idempotencyKey =
-      typeof suppliedKey === 'string' ? suppliedKey : `analytics:${datasetVersionId}:${querySpec}`;
+      typeof suppliedKey === 'string' ? suppliedKey : `analytics:${datasetVersionId}:${querySpec}${paramsDigest}`;
 
     const { job, created } = await dbEnqueueJob(
       randomUUID(),
       workspaceId,
       'analytics_query',
       idempotencyKey,
-      { datasetVersionId, querySpec, resultId: randomUUID() },
+      { datasetVersionId, querySpec, params: queryParams, resultId: randomUUID() },
       auth.principal.id
     );
     sendJson(res, created ? 201 : 200, {

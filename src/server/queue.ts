@@ -5,7 +5,7 @@
  */
 
 import { JobOutcome, processJob } from '../jobs/worker';
-import { dbClaimJob, dbCompleteJob, dbEnqueueFileTransition, dbEnqueueJob, dbEpistemicWatermarkService, dbFailJob, dbGetArchiveRecord, dbGetDatasetVersion, dbHasOpenFileJob, dbListAgedActiveFiles, dbListRetentionWorkspaces, dbReadEpistemicGraphService, dbRecordActivity, dbRecordOpsEvent, dbRegisterAnalyticsResult, dbUpsertGraphProjectionService } from './db';
+import { dbClaimJob, dbCompleteJob, dbEnqueueFileTransition, dbEnqueueJob, dbEpistemicWatermarkService, dbFailJob, dbGetArchiveRecord, dbGetDatasetVersion, dbGetWorkspaceSpec, dbHasOpenFileJob, dbListAgedActiveFiles, dbListRetentionWorkspaces, dbReadEpistemicGraphService, dbRecordActivity, dbRecordOpsEvent, dbRegisterAnalyticsResult, dbUpsertGraphProjectionService } from './db';
 import { loadArchiveRecord } from './present';
 import { archiveDeps, graphClient, objectStore } from './runtime';
 import { randomUUID } from 'crypto';
@@ -57,6 +57,8 @@ export async function drainQueueOnce(targetWorkspaceId?: string, maxJobs = 10): 
         ? {
             loadVersion: (workspaceId, datasetVersionId) =>
               dbGetDatasetVersion(workspaceId, datasetVersionId),
+            loadWorkspaceSpec: (workspaceId, slug, version) =>
+              dbGetWorkspaceSpec(workspaceId, slug, version),
             registerResult: async (input) => {
               await dbRegisterAnalyticsResult(input);
             },

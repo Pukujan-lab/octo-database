@@ -16,6 +16,8 @@ import type {
   AnalyticsRunSummary,
   DatasetSummary,
   DatasetVersionRecord,
+  SpecParam,
+  WorkspaceSpecRecord,
 } from '../types/analytics';
 const { Pool } = pg;
 
@@ -3517,6 +3519,85 @@ export async function dbGetDatasetVersion(
     [workspaceId, datasetVersionId]
   );
   return rows[0] ? toDatasetVersionRecord(rows[0]) : null;
+}
+
+/** The newest version of a workspace's dataset, by slug. */
+export async function dbGetLatestDatasetVersion(
+  workspaceId: string,
+  datasetSlug: string
+): Promise<DatasetVersionRecord | null> {
+  const rows = await queryService<Record<string, unknown>>(
+    `SELECT ${DATASET_VERSION_COLUMNS}
+     FROM octo.dataset_versions v
+     JOIN octo.datasets d ON d.id = v.dataset_id
+     WHERE v.workspace_id = $1 AND d.slug = $2
+     ORDER BY v.version DESC
+     LIMIT 1`,
+    [workspaceId, datasetSlug]
+  );
+  return rows[0] ? toDatasetVersionRecord(rows[0]) : null;
+}
+
+const WORKSPACE_SPEC_COLUMNS = 'id, slug, version, sql, params, created_at AS "createdAt"';
+
+function toWorkspaceSpecRecord(row: Record<string, unknown>): WorkspaceSpecRecord {
+  const slug = String(row['slug']);
+  const version = Number(row['version']);
+  return {
+    id: String(row['id']),
+    slug,
+    version,
+    specId: `ws:${slug}@${version}`,
+    sql: String(row['sql']),
+    params: (row['params'] ?? []) as SpecParam[],
+    createdAt: isoInstant(row['createdAt']),
+  };
+}
+
+/** Stores the next immutable version of a workspace spec. */
+export async function dbCreateWorkspaceSpec(input: {
+  workspaceId: string;
+  createdBy: string;
+  slug: string;
+  sql: string;
+  params: SpecParam[];
+}): Promise<WorkspaceSpecRecord | null> {
+  try {
+    const rows = await queryService<Record<string, unknown>>(
+      `INSERT INTO octo.analytics_specs (workspace_id, slug, version, sql, params, created_by)
+       SELECT $1, $2, COALESCE(max(version), 0) + 1, $3, $4, $5
+       FROM octo.analytics_specs WHERE workspace_id = $1 AND slug = $2
+       RETURNING ${WORKSPACE_SPEC_COLUMNS}`,
+      [input.workspaceId, input.slug, input.sql, JSON.stringify(input.params), input.createdBy]
+    );
+    return rows[0] ? toWorkspaceSpecRecord(rows[0]) : null;
+  } catch (error) {
+    // A concurrent writer took the same version number.
+    if ((error as { code?: string }).code === '23505') return null;
+    throw error;
+  }
+}
+
+export async function dbGetWorkspaceSpec(
+  workspaceId: string,
+  slug: string,
+  version: number
+): Promise<WorkspaceSpecRecord | null> {
+  const rows = await queryService<Record<string, unknown>>(
+    `SELECT ${WORKSPACE_SPEC_COLUMNS} FROM octo.analytics_specs
+     WHERE workspace_id = $1 AND slug = $2 AND version = $3`,
+    [workspaceId, slug, version]
+  );
+  return rows[0] ? toWorkspaceSpecRecord(rows[0]) : null;
+}
+
+export async function dbListWorkspaceSpecs(workspaceId: string): Promise<WorkspaceSpecRecord[]> {
+  const rows = await queryService<Record<string, unknown>>(
+    `SELECT ${WORKSPACE_SPEC_COLUMNS} FROM octo.analytics_specs
+     WHERE workspace_id = $1 ORDER BY slug, version DESC`,
+    [workspaceId]
+  );
+  return rows.map(toWorkspaceSpecRecord);
 }
 
 export async function dbGetAnalyticsJob(workspaceId: string, jobId: string): Promise<DbJobRow | null> {

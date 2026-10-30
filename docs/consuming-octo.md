@@ -162,9 +162,19 @@ analytics service and nothing to deploy.
 
 Four rules define the surface:
 
-- **The caller never supplies SQL and never supplies an object key.** You name a dataset,
-  a query spec, and ids. The server builds the statement and derives every storage key
-  from the authenticated workspace.
+- **The caller never supplies an object key.** You name a dataset, a query spec, and ids.
+  The server derives every storage key from the authenticated workspace. A dataset can
+  have any schema; the built-in spec `job-failures-by-type-month@1` needs
+  `job_type`, `state` and `created_at`, and checks that when a query is submitted.
+- **SQL is allowed only as a registered workspace spec.** `POST
+  /api/workspaces/<id>/analytics/specs` (write scope) takes `{ slug, dataset, sql, params }`:
+  one `SELECT` that reads the view `data` (the dataset version the query runs over) and
+  `$name` parameters declared as `text`, `integer`, `double`, `boolean`, `date` or
+  `timestamp` (dates and timestamps bind as text; write `CAST($since AS DATE)`). The spec
+  is validated against the dataset's schema and stored as an immutable version
+  `ws:<slug>@<n>`; submit it to `analytics.query` with `"params": { ... }`. DuckDB is
+  locked before the SQL runs: it can read only the mounted dataset parts, not other files,
+  URLs or extensions, and cannot change its own settings.
 - **A registration is immutable.** A re-export is a new version (`v1`, `v2`, …); nothing
   is mutated or overwritten.
 - **Query execution is a job.** Submission returns a job id; poll it, then fetch the

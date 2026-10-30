@@ -69,3 +69,23 @@ export interface AnalyticsRows {
   rowCount: number;
   truncated: boolean;
 }
+
+/** Parameter types a workspace spec may declare; date and timestamp bind as text. */
+export type SpecParamType = 'text' | 'integer' | 'double' | 'boolean' | 'date' | 'timestamp';
+
+export interface SpecParam {
+  name: string;
+  type: SpecParamType;
+}
+
+/** One immutable version of a workspace-registered query spec. */
+export interface WorkspaceSpecRecord {
+  id: string;
+  slug: string;
+  version: number;
+  /** The id a query submits: `ws:<slug>@<version>`. */
+  specId: string;
+  sql: string;
+  params: SpecParam[];
+  createdAt: string;
+}

@@ -147,12 +147,27 @@ export const OCTO_CAPABILITIES: CapabilityDescriptor[] = [
       'Register an immutable Parquet dataset version: supply base64 parts, a declared schema, and provenance; the server validates the Parquet footers, assigns the next version, derives the object keys, and writes the bytes. A re-export is a new version, never a mutation.',
   },
   {
+    action: 'analytics.register_spec',
+    method: 'POST',
+    path: '/api/workspaces/<id>/analytics/specs',
+    requiredScope: 'write',
+    description:
+      'Register a workspace query spec: one SELECT over a dataset (exposed to the SQL as the view "data") with typed $params. The server validates it against the dataset schema and stores it as an immutable version, ws:<slug>@<n>. A spec can read only the dataset version it is run over.',
+  },
+  {
+    action: 'analytics.specs',
+    method: 'GET',
+    path: '/api/workspaces/<id>/analytics/specs',
+    requiredScope: 'read',
+    description: 'List the workspace\'s registered query specs with their SQL and parameters.',
+  },
+  {
     action: 'analytics.query',
     method: 'POST',
     path: '/api/workspaces/<id>/analytics/queries',
     requiredScope: 'read',
     description:
-      'Submit one named analytical query over a registered dataset version. The caller names a query spec, never SQL; the server builds the statement and enqueues an analytics_query job. Poll the job with analytics.query_status.',
+      'Submit one named analytical query over a registered dataset version. The caller names a built-in spec or a registered workspace spec (ws:<slug>@<n>) plus its params, never raw SQL; the server enqueues an analytics_query job. Poll the job with analytics.query_status.',
   },
   {
     action: 'analytics.query_status',
