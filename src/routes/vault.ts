@@ -782,8 +782,8 @@ function leaseRecipe(
 
 /**
  * Exchanges a grant for one working key scoped to one stored item. The key is
- * shown once; Octo keeps only its hash. A new mint for the same (grant, item)
- * retires the previous key.
+ * shown once; Octo keeps only its hash. Each mint is a separate key, so every
+ * consumer of the same (grant, item) can hold its own.
  */
 async function mintLease(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   const grant = await loadGrant(req, res);

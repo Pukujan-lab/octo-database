@@ -89,7 +89,8 @@ active_r2 ──archive──▶ archiving ──▶ archived_drive
 
 ### Two key types
 
-- **Account-wide** (`octo_live_acc_`) — at most **one per principal**; reaches
+- **Account-wide** (`octo_live_acc_`) — one or more per principal (one per place
+  that uses it); reaches
   every workspace the principal is a member of; carries `role NULL` so authority
   is derived from live memberships, never asserted by the key.
 - **Workspace-scoped** (`octo_live_ws_`) — exactly **one per workspace**,

@@ -2551,18 +2551,6 @@ export async function dbClearMfa(principalId: string): Promise<void> {
   );
 }
 
-/** The id of a principal's account-wide key, or null. Enforces the one-key rule. */
-export async function dbGetAccountWideKeyId(principalId: string): Promise<string | null> {
-  // An account-wide key has workspace_id NULL by definition, so a scoped key's fence
-  // would hide it. This is a pre-mint existence check for the one-key rule, not tenant
-  // data; it reads the caller's own key row on the trusted path.
-  const rows = await queryService<{ id: string }>(
-    'SELECT id FROM octo.api_keys WHERE principal_id = $1 AND workspace_id IS NULL LIMIT 1',
-    [principalId]
-  );
-  return rows[0]?.id ?? null;
-}
-
 /** Workspaces that have a retention window set, for the archive sweep. */
 export async function dbListRetentionWorkspaces(): Promise<{ id: string; retentionDays: number }[]> {
   return queryService<{ id: string; retentionDays: number }>(
@@ -3224,8 +3212,8 @@ export async function dbRevokeVaultLease(principalId: string, leaseId: string): 
 
 /**
  * Mints a lease for a grant. The agent has no session, so this runs on the
- * service pool. An active lease for the same (grant, item) is rotated out in
- * the same transaction, which the partial unique index also enforces.
+ * service pool. Other live leases for the same (grant, item) stay valid, so
+ * each consumer can hold its own key.
  */
 export async function dbInsertVaultLeaseService(input: {
   id: string;
@@ -3242,35 +3230,27 @@ export async function dbInsertVaultLeaseService(input: {
   bodyField: string | null;
   basicUsername: string | null;
 }): Promise<void> {
-  await withTransaction(async (client) => {
-    await client.query(
-      `UPDATE octo.vault_leases
-       SET revoked_at = now()
-       WHERE parent_grant_id = $1 AND item_id = $2 AND revoked_at IS NULL`,
-      [input.parentGrantId, input.itemId]
-    );
-    await client.query(
-      `INSERT INTO octo.vault_leases (
-         id, principal_id, item_id, parent_grant_id, key_hash, prefix, name, expires_at,
-         base_url, auth_scheme, auth_header, body_field, basic_username
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-      [
-        input.id,
-        input.principalId,
-        input.itemId,
-        input.parentGrantId,
-        input.keyHash,
-        input.prefix,
-        input.name,
-        input.expiresAt,
-        input.baseUrl,
-        input.authScheme,
-        input.authHeader,
-        input.bodyField,
-        input.basicUsername,
-      ]
-    );
-  }, servicePool);
+  await queryService(
+    `INSERT INTO octo.vault_leases (
+       id, principal_id, item_id, parent_grant_id, key_hash, prefix, name, expires_at,
+       base_url, auth_scheme, auth_header, body_field, basic_username
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [
+      input.id,
+      input.principalId,
+      input.itemId,
+      input.parentGrantId,
+      input.keyHash,
+      input.prefix,
+      input.name,
+      input.expiresAt,
+      input.baseUrl,
+      input.authScheme,
+      input.authHeader,
+      input.bodyField,
+      input.basicUsername,
+    ]
+  );
 }
 
 /** Extends a live lease. Returns the new expiry, or null when it is gone. */

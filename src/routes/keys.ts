@@ -9,7 +9,7 @@ import { KEY_CLASSES, KeyClass } from '../api/capabilities';
 import { authorizeKeyMint, hashApiKeySecret, parseKeyScopes } from '../api/keys';
 import { authenticateRequest, requireScope, scopeDenied } from '../server/auth-context';
 import { confirmGate } from '../server/confirm';
-import { dbGetAccountWideKeyId, dbGetWorkspaceMembership, dbInsertApiKey, dbListApiKeys, dbUpdateApiKeyScopes, query } from '../server/db';
+import { dbGetWorkspaceMembership, dbInsertApiKey, dbListApiKeys, dbUpdateApiKeyScopes, query } from '../server/db';
 import { readJsonObject, sendJson } from '../server/http';
 import { UUID_PATTERN } from '../server/runtime';
 import { randomUUID } from 'crypto';
@@ -161,15 +161,6 @@ export async function handleKeysRoutes(
       return true;
 
     const isAccountWide = !workspaceId;
-
-    // At most one account-wide key per principal (enforced by a partial unique
-    // index). Refuse a duplicate with guidance rather than minting a second one.
-    if (isAccountWide && (await dbGetAccountWideKeyId(auth.principal.id))) {
-      sendJson(res, 409, {
-        error: 'ACCOUNT_KEY_EXISTS: revoke the existing account-wide key before creating another.',
-      });
-      return true;
-    }
 
     const prefix = isAccountWide ? 'octo_live_acc' : 'octo_live_ws';
     const secretBytes = randomUUID().replace(/-/g, '');
