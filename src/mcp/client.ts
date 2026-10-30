@@ -50,6 +50,10 @@ export class OctoApi {
     return text ? JSON.parse(text) : null;
   }
 
+  capabilities(): Promise<unknown> {
+    return this.request('GET', '/api/capabilities');
+  }
+
   me(): Promise<unknown> {
     return this.request('GET', '/api/me');
   }

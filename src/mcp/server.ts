@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { OctoApi } from './client';
 
 function asText(value: unknown): { content: Array<{ type: 'text'; text: string }> } {
-  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+  return { content: [{ type: 'text', text: JSON.stringify(value) }] };
 }
 
 function asError(error: unknown): {
@@ -25,6 +25,78 @@ function asError(error: unknown): {
   return { isError: true, content: [{ type: 'text', text: message }] };
 }
 
+/** Topic text for the `guide` tool; kept out of the connect-time instructions. */
+const GUIDE_TOPICS: Record<string, string> = {
+  workspaces:
+    "A workspace's durable data lives in Octo. Provision its database through Octo and reach it with query_workspace_database (the Octo token only, no connection string), or with the connection string provision_database returns once. A workspace-scoped key (octo_live_ws_) reaches only its own workspace and cannot create workspaces or mint keys; an account-wide key (octo_live_acc_) manages every workspace the principal belongs to.",
+  ledger:
+    'The epistemic ledger is append-only and bitemporal: record_epistemic writes; query_claims_as_of and query_belief_as_of read as of a recorded-time and/or valid-time instant.',
+  analytics:
+    'register_dataset registers immutable Parquet versions (append: true adds new date partitions to the newest one). query_dataset runs a named spec: the built-in job-failures-by-type-month@1, or a workspace spec ws:<slug>@<n> registered over the HTTP API (analytics.register_spec) with its params. Poll get_analytics_query_status, then get_analytics_result. Schedules that write results into the workspace database are managed over the HTTP API (analytics.schedule).',
+  keys: 'mint_key is human-stamped: it needs a session with the confirmation secret. A token can only narrow its own authority, never widen scopes or escape its workspace. The raw secret is shown exactly once.',
+};
+
+/**
+ * The capability action each tool needs (see OCTO_CAPABILITIES). A tool with no
+ * entry is always listed.
+ */
+export const TOOL_ACTIONS: Record<string, string> = {
+  list_workspaces: 'workspaces.list',
+  create_workspace: 'workspaces.create',
+  provision_database: 'workspaces.provision_database',
+  query_workspace_database: 'workspaces.query',
+  list_files: 'files.list',
+  upload_file: 'files.upload',
+  download_file: 'files.download',
+  delete_file: 'files.delete',
+  ingest_document: 'rag.ingest',
+  list_documents: 'rag.list',
+  get_document: 'rag.get',
+  rename_document: 'rag.rename',
+  delete_document: 'rag.delete',
+  query_graph: 'graph.query',
+  project_graph: 'graph.project',
+  graph_health: 'graph.health',
+  record_epistemic: 'epistemic.record',
+  query_claims_as_of: 'epistemic.claims_as_of',
+  query_belief_as_of: 'epistemic.belief_as_of',
+  list_ops_events: 'ops.list',
+  get_ops_summary: 'ops.summary',
+  retry_job: 'jobs.enqueue',
+  register_dataset: 'datasets.register',
+  query_dataset: 'analytics.query',
+  get_analytics_query_status: 'analytics.query_status',
+  get_analytics_result: 'analytics.result',
+};
+
+/**
+ * Hides every tool the calling key cannot use, from GET /api/capabilities. Call
+ * it once the server is built; if the lookup fails every tool stays listed and
+ * the API still refuses what the key may not do.
+ */
+export async function restrictToCapabilities(server: McpServer, api: OctoApi): Promise<number> {
+  let actions: Set<string>;
+  try {
+    const body = (await api.capabilities()) as { capabilities?: Array<{ action?: string }> };
+    if (!Array.isArray(body?.capabilities)) return 0;
+    actions = new Set(body.capabilities.map((capability) => String(capability.action)));
+  } catch {
+    return 0;
+  }
+  const registered = (server as unknown as {
+    _registeredTools: Record<string, { disable(): void }>;
+  })._registeredTools;
+  let hidden = 0;
+  for (const [name, tool] of Object.entries(registered)) {
+    const action = TOOL_ACTIONS[name];
+    if (action && !actions.has(action)) {
+      tool.disable();
+      hidden += 1;
+    }
+  }
+  return hidden;
+}
+
 export function createOctoMcpServer(api: OctoApi): McpServer {
   // Orientation the client receives at connect time, so an agent does not have to
   // learn the platform's rules by trial. Mirrors docs/consuming-octo.md.
@@ -32,13 +104,20 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
     { name: 'octo', version: '0.1.0' },
     {
       instructions: [
-        'Octo is a self-hosted workspace data platform and the data layer for the projects it serves.',
-        "A workspace's durable data lives in Octo: do not stand up a separate database for a project Octo serves. Provision the workspace database through Octo and reach it with query_workspace_database, or with its own connection string.",
-        'A workspace-scoped key (octo_live_ws_) reaches only its own workspace and cannot create workspaces or mint keys — both are human-stamped. An account-wide key (octo_live_acc_) manages every workspace the principal belongs to.',
-        'The epistemic ledger is append-only and bitemporal: record_epistemic writes; query_claims_as_of and query_belief_as_of read as of a recorded-time and/or valid-time instant.',
-        'Historical analytics is register_dataset (immutable Parquet versions) then query_dataset (a named spec, never SQL), polled with get_analytics_query_status and downloaded with get_analytics_result.',
+        'Octo is a self-hosted workspace data platform and the data layer for the projects it serves: do not stand up a separate database for a project Octo serves.',
+        'Only the tools your key can use are listed. Call guide with a topic (workspaces, ledger, analytics, keys) for how a surface works.',
         "Octo's repository is read-only to adopters: propose a change as an OIO observational issue, never a pull request.",
       ].join(' '),
+    }
+  );
+
+  server.tool(
+    'guide',
+    'How an Octo surface works, on demand. Topics: workspaces, ledger, analytics, keys. Call with no topic to list them.',
+    { topic: z.string().optional().describe('workspaces, ledger, analytics or keys') },
+    async ({ topic }) => {
+      const text = topic ? GUIDE_TOPICS[topic] : undefined;
+      return asText(text ? { topic, guide: text } : { topics: Object.keys(GUIDE_TOPICS) });
     }
   );
 
