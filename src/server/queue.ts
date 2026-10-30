@@ -5,8 +5,10 @@
  */
 
 import { JobOutcome, processJob } from '../jobs/worker';
-import { dbClaimJob, dbCompleteJob, dbEnqueueFileTransition, dbEnqueueJob, dbEpistemicWatermarkService, dbFailJob, dbGetArchiveRecord, dbGetDatasetVersion, dbGetLatestDatasetVersion, dbGetWorkspaceSpec, dbListDueAnalyticsSchedules, dbMarkAnalyticsScheduleRan, dbHasOpenFileJob, dbListAgedActiveFiles, dbListRetentionWorkspaces, dbReadEpistemicGraphService, dbRecordActivity, dbRecordOpsEvent, dbRegisterAnalyticsResult, dbUpsertGraphProjectionService } from './db';
+import { dbClaimJob, dbEnsureEmbeddingConfig, dbReplaceChunksAndEmbeddings, dbUpsertDocumentVersion, queryService, dbCompleteJob, dbEnqueueFileTransition, dbEnqueueJob, dbEpistemicWatermarkService, dbFailJob, dbGetArchiveRecord, dbGetDatasetVersion, dbGetLatestDatasetVersion, dbGetWorkspaceSpec, dbListDueAnalyticsSchedules, dbMarkAnalyticsScheduleRan, dbHasOpenFileJob, dbListAgedActiveFiles, dbListRetentionWorkspaces, dbReadEpistemicGraphService, dbRecordActivity, dbRecordOpsEvent, dbRegisterAnalyticsResult, dbUpsertGraphProjectionService } from './db';
 import { writeAnalyticsSink } from './analytics-sink';
+import { loadEmbeddingConfigFromEnv } from '../rag/embeddings';
+import { loadReaderConfigFromEnv } from '../rag/reader';
 import { loadArchiveRecord } from './present';
 import { archiveDeps, graphClient, objectStore } from './runtime';
 import { randomUUID } from 'crypto';
@@ -66,6 +68,22 @@ export async function drainQueueOnce(targetWorkspaceId?: string, maxJobs = 10): 
             },
           }
         : undefined,
+      // A `rag_ingest_file` job indexes one uploaded file. Same trusted pool and
+      // workspace pinning as the jobs above.
+      ragIngest: {
+        embedding: loadEmbeddingConfigFromEnv(),
+        reader: loadReaderConfigFromEnv(),
+        loadFile: async (workspaceId, fileId) => {
+          const file = await dbGetArchiveRecord(workspaceId, fileId);
+          return file ? { name: file.name, mimeType: file.mimeType, storageKey: file.storageKey } : null;
+        },
+        ensureConfig: (workspaceId, c) =>
+          dbEnsureEmbeddingConfig(workspaceId, c.model, c.modelVersion, c.dimensions, c.chunker, c.chunkSize, c.chunkOverlap, queryService),
+        upsertVersion: (v) =>
+          dbUpsertDocumentVersion(v.workspaceId, v.title, v.contentHash, v.mimeType, v.byteSize, v.extractedText, null, v.fileId, queryService),
+        replaceChunks: (workspaceId, versionId, configId, chunks, vectors) =>
+          dbReplaceChunksAndEmbeddings(workspaceId, versionId, configId, chunks, vectors, queryService),
+      },
       // Resolve the thumbnail target through the trusted service pool: the app
       // pool is RLS-fenced and the scheduler drain runs with no caller identity.
       // Pinning to the job's workspace is what stops a payload from pointing the
