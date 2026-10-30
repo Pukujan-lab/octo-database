@@ -2089,7 +2089,7 @@ function EditItem({
         if (!open) onClose();
       }}
     >
-      <DialogContent data-testid="vault-edit-dialog" className="max-h-[90vh] max-w-lg overflow-y-auto">
+      <DialogContent data-testid="vault-edit-dialog" className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{item.label}</DialogTitle>
           <DialogDescription>

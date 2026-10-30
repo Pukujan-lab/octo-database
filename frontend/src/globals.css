@@ -550,6 +550,13 @@
     text-rendering: optimizeLegibility;
   }
 
+  input,
+  textarea,
+  select {
+    scroll-margin-top: 1rem;
+    scroll-margin-bottom: 30vh;
+  }
+
   h1,
   h2,
   h3,

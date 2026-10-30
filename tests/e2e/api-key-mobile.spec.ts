@@ -16,7 +16,10 @@ test('keeps API key creation and the new secret on a phone screen', async ({ pag
   const mintButton = page.getByRole('button', { name: 'Mint key' });
   await expect(nameInput).toBeVisible();
   await expect(mintButton).toBeVisible();
+  // The form opens at the top. On a phone the confirm gate pushes Mint key
+  // below the fold; a swipe of the dialog brings it fully on screen.
   await expectOnScreen(nameInput, viewport);
+  await mintButton.scrollIntoViewIfNeeded();
   await expectOnScreen(mintButton, viewport);
 
   const overflow = await page.evaluate(

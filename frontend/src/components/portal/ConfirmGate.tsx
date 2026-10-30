@@ -49,8 +49,12 @@ export function ConfirmGate({
   const [now, setNow] = useState(() => Date.now());
 
   // The code arrives after mount, so a plain autoFocus would miss it.
+  // On a phone, focusing this field pans the visual viewport and opens the
+  // keyboard over the rest of the form. Leave the focus where the person tapped.
   useEffect(() => {
-    if (code) fieldRef.current?.focus();
+    if (!code) return;
+    if (window.matchMedia("(max-width: 640px)").matches) return;
+    fieldRef.current?.focus({ preventScroll: true });
   }, [code]);
 
   useEffect(() => {
