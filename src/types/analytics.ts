@@ -68,6 +68,8 @@ export interface AnalyticsRows {
   rows: Array<Record<string, unknown>>;
   rowCount: number;
   truncated: boolean;
+  /** DuckDB type name per column, in column order. */
+  columnTypes: string[];
 }
 
 /** Parameter types a workspace spec may declare; date and timestamp bind as text. */
@@ -87,5 +89,28 @@ export interface WorkspaceSpecRecord {
   specId: string;
   sql: string;
   params: SpecParam[];
+  createdAt: string;
+}
+
+/** Where a scheduled run writes its rows: `analytics.<table>` in the workspace database. */
+export interface AnalyticsSink {
+  table: string;
+  mode: 'replace' | 'upsert';
+  /** Key columns; required for `upsert`. */
+  keys: string[];
+}
+
+export interface AnalyticsScheduleRecord {
+  id: string;
+  spec: string;
+  dataset: string;
+  params: Record<string, string | number | boolean>;
+  everyMinutes: number;
+  sink: AnalyticsSink;
+  enabled: boolean;
+  lastDatasetVersionId: string | null;
+  nextRunAt: string;
+  createdBy: string | null;
+  workspaceId: string;
   createdAt: string;
 }

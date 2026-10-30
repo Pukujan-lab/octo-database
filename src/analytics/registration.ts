@@ -34,6 +34,12 @@ export interface RegisterVersionInput {
   idempotencyKey: string | null;
   buildObjectKeys: (version: number) => string[];
   writeObjects: (keys: string[]) => Promise<void>;
+  /**
+   * Set when the new version extends an earlier one: it must be built on exactly
+   * `baseVersion` (else the write is a conflict) and carries `carryKeys` forward
+   * without re-uploading them. `rowCount` then counts the new parts only.
+   */
+  append: { baseVersion: number; carryKeys: string[]; baseRowCount: number } | null;
 }
 
 export type RegisterVersionResult =
@@ -42,6 +48,8 @@ export type RegisterVersionResult =
 
 export interface AnalyticsCatalogWriter {
   createVersion(input: RegisterVersionInput): Promise<RegisterVersionResult>;
+  /** The newest version of a dataset, used as the base of an append. */
+  latestVersion(workspaceId: string, slug: string): Promise<DatasetVersionRecord | null>;
 }
 
 export type RegisterOutcome =
@@ -51,6 +59,11 @@ export type RegisterOutcome =
 interface ParsedPart {
   partition: string;
   bytes: Buffer;
+}
+
+/** The `YYYY-MM-DD` of a part key laid out by `datasetPartKey`. */
+function partitionOfKey(key: string): string {
+  return /\/dt=(\d{4}-\d{2}-\d{2})\//.exec(key)?.[1] ?? '';
 }
 
 function bad(message: string, error = 'BAD_REQUEST'): RegisterOutcome {
@@ -143,6 +156,31 @@ export async function registerDatasetVersion(
   const parsedParts = parseParts(body['parts']);
   if (typeof parsedParts === 'string') return bad(parsedParts);
 
+  // `append: true` extends the newest version with new partitions. The result is
+  // still a new immutable version; the earlier parts are referenced, not copied.
+  const appendRequested = body['append'];
+  if (appendRequested !== undefined && typeof appendRequested !== 'boolean') {
+    return bad('append must be a boolean when supplied');
+  }
+  let base: DatasetVersionRecord | null = null;
+  if (appendRequested) {
+    base = await catalog.latestVersion(input.workspaceId, dataset);
+    if (!base) {
+      return { ok: false, http: 404, error: 'DATASET_NOT_FOUND', message: 'nothing to append to; register the dataset first' };
+    }
+    if (!schemaMatchesDeclared(base.schema, declared)) {
+      return { ok: false, http: 400, error: 'SCHEMA_MISMATCH', message: 'an append must use the dataset\'s existing schema' };
+    }
+    const existing = new Set(base.objectKeys.map(partitionOfKey));
+    for (const part of parsedParts) {
+      if (existing.has(part.partition)) {
+        return { ok: false, http: 409, error: 'PARTITION_EXISTS', message: `partition ${part.partition} is already in this dataset` };
+      }
+    }
+    const incoming = new Set(parsedParts.map((part) => part.partition));
+    if (incoming.size !== parsedParts.length) return bad('parts must not repeat a partition');
+  }
+
   const engine = await analyticsEngineStatus();
   if (!engine.configured) {
     return {
@@ -229,10 +267,13 @@ export async function registerDatasetVersion(
       schema: declared,
       provenance: provenance as Record<string, unknown>,
       watermark: typeof watermark === 'string' ? watermark : null,
-      rowCount,
+      rowCount: base ? base.rowCount + rowCount : rowCount,
       idempotencyKey: typeof idempotencyKey === 'string' ? idempotencyKey : null,
       buildObjectKeys,
       writeObjects,
+      append: base
+        ? { baseVersion: base.version, carryKeys: base.objectKeys, baseRowCount: base.rowCount }
+        : null,
     });
 
     if (result.status === 'conflict') {

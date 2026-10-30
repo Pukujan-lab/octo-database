@@ -20,12 +20,15 @@ import {
 } from './engine';
 import { assertWorkspaceKey, resultObjectKey } from './paths';
 import { carriesSpecInputs, coerceParams, getQuerySpec, parseWorkspaceSpecId } from './specs';
-import type { DatasetVersionRecord, WorkspaceSpecRecord } from '../types/analytics';
+import { SINK_SCHEMA as SINK_LABEL, validateSink } from './sink';
+import type { AnalyticsSink, DatasetVersionRecord, WorkspaceSpecRecord } from '../types/analytics';
 
 export interface AnalyticsJobDeps {
   store: ObjectStore;
   loadVersion: (workspaceId: string, datasetVersionId: string) => Promise<DatasetVersionRecord | null>;
   loadWorkspaceSpec: (workspaceId: string, slug: string, version: number) => Promise<WorkspaceSpecRecord | null>;
+  /** Lands a scheduled run's rows in the workspace database. Absent when none is wired. */
+  writeSink?: (input: { workspaceId: string; sink: AnalyticsSink; resultBytes: Buffer }) => Promise<{ rowsWritten: number }>;
   registerResult: (input: {
     workspaceId: string;
     datasetVersionId: string;
@@ -60,6 +63,14 @@ export async function runAnalyticsJob(
     typeof resultId !== 'string'
   ) {
     return failure('INVALID_PAYLOAD', 'analytics job payload must carry datasetVersionId, querySpec, and resultId');
+  }
+
+  let sink: AnalyticsSink | null = null;
+  if (job.payload['sink'] !== undefined) {
+    const parsed = validateSink(job.payload['sink']);
+    if (!parsed.ok) return failure('INVALID_PAYLOAD', parsed.message);
+    if (!deps.writeSink) return failure('SINK_NOT_CONFIGURED', 'this worker cannot write to workspace databases');
+    sink = parsed.sink;
   }
 
   const workspaceRef = parseWorkspaceSpecId(querySpec);
@@ -131,9 +142,19 @@ export async function runAnalyticsJob(
       engineVersion: run.engineVersion,
     });
 
+    let sinkNote = '';
+    if (sink) {
+      try {
+        const written = await deps.writeSink!({ workspaceId: job.workspaceId, sink, resultBytes: run.bytes });
+        sinkNote = `; wrote ${written.rowsWritten} row(s) to ${SINK_LABEL}.${sink.table}`;
+      } catch (error) {
+        return failure('SINK_ERROR', error instanceof Error ? error.message : String(error));
+      }
+    }
+
     return {
       ok: true,
-      detail: `${querySpec} over ${version.objectKeys.length} part(s) -> ${run.rowCount} row(s)`,
+      detail: `${querySpec} over ${version.objectKeys.length} part(s) -> ${run.rowCount} row(s)${sinkNote}`,
     };
   } finally {
     removeJobDirectory(dir);

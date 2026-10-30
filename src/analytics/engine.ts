@@ -27,9 +27,10 @@ export const ANALYTICS_ROWS_LIMIT = 500;
  */
 export async function readParquetRows(
   bytes: Buffer,
-  limit = ANALYTICS_ROWS_LIMIT
+  limit = ANALYTICS_ROWS_LIMIT,
+  cap = ANALYTICS_ROWS_LIMIT
 ): Promise<AnalyticsRows> {
-  const capped = Math.max(1, Math.min(Math.floor(limit), ANALYTICS_ROWS_LIMIT));
+  const capped = Math.max(1, Math.min(Math.floor(limit), cap));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'octo-analytics-rows-'));
   const file = path.join(dir, 'result.parquet');
   fs.writeFileSync(file, bytes);
@@ -67,6 +68,7 @@ export async function readParquetRows(
 
     return {
       columns: described.map((row) => String(row['column_name'])),
+      columnTypes: described.map((row) => String(row['column_type'])),
       rows,
       rowCount: total,
       truncated: total > rows.length,

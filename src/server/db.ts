@@ -13,6 +13,8 @@ export type { GraphProjectionRow, GraphProjectionRecord } from '../types/graph';
 import type { RegisterVersionInput, RegisterVersionResult } from '../analytics/registration';
 import type {
   AnalyticsResultRecord,
+  AnalyticsScheduleRecord,
+  AnalyticsSink,
   AnalyticsRunSummary,
   DatasetSummary,
   DatasetVersionRecord,
@@ -3465,8 +3467,13 @@ export async function dbRegisterDatasetVersion(
       ).rows[0] as { version: number };
       const version = Number(next.version);
 
-      const objectKeys = input.buildObjectKeys(version);
-      await input.writeObjects(objectKeys);
+      if (input.append && version !== input.append.baseVersion + 1) {
+        return { status: 'conflict' as const };
+      }
+
+      const newKeys = input.buildObjectKeys(version);
+      await input.writeObjects(newKeys);
+      const objectKeys = input.append ? [...input.append.carryKeys, ...newKeys] : newKeys;
 
       const inserted = await tx.query(
         `INSERT INTO octo.dataset_versions
@@ -3598,6 +3605,97 @@ export async function dbListWorkspaceSpecs(workspaceId: string): Promise<Workspa
     [workspaceId]
   );
   return rows.map(toWorkspaceSpecRecord);
+}
+
+const SCHEDULE_COLUMNS = `id, workspace_id AS "workspaceId", spec, dataset, params,
+  every_minutes AS "everyMinutes", sink, enabled,
+  last_dataset_version_id AS "lastDatasetVersionId", next_run_at AS "nextRunAt",
+  created_by AS "createdBy", created_at AS "createdAt"`;
+
+function toScheduleRecord(row: Record<string, unknown>): AnalyticsScheduleRecord {
+  return {
+    id: String(row['id']),
+    workspaceId: String(row['workspaceId']),
+    spec: String(row['spec']),
+    dataset: String(row['dataset']),
+    params: (row['params'] ?? {}) as AnalyticsScheduleRecord['params'],
+    everyMinutes: Number(row['everyMinutes']),
+    sink: row['sink'] as AnalyticsSink,
+    enabled: Boolean(row['enabled']),
+    lastDatasetVersionId: row['lastDatasetVersionId'] ? String(row['lastDatasetVersionId']) : null,
+    nextRunAt: isoInstant(row['nextRunAt']),
+    createdBy: row['createdBy'] ? String(row['createdBy']) : null,
+    createdAt: isoInstant(row['createdAt']),
+  };
+}
+
+export async function dbCreateAnalyticsSchedule(input: {
+  workspaceId: string;
+  createdBy: string;
+  spec: string;
+  dataset: string;
+  params: Record<string, string | number | boolean>;
+  everyMinutes: number;
+  sink: AnalyticsSink;
+}): Promise<AnalyticsScheduleRecord> {
+  const rows = await queryService<Record<string, unknown>>(
+    `INSERT INTO octo.analytics_schedules
+       (workspace_id, spec, dataset, params, every_minutes, sink, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING ${SCHEDULE_COLUMNS}`,
+    [
+      input.workspaceId,
+      input.spec,
+      input.dataset,
+      JSON.stringify(input.params),
+      input.everyMinutes,
+      JSON.stringify(input.sink),
+      input.createdBy,
+    ]
+  );
+  return toScheduleRecord(rows[0]!);
+}
+
+export async function dbListAnalyticsSchedules(workspaceId: string): Promise<AnalyticsScheduleRecord[]> {
+  const rows = await queryService<Record<string, unknown>>(
+    `SELECT ${SCHEDULE_COLUMNS} FROM octo.analytics_schedules WHERE workspace_id = $1 ORDER BY created_at`,
+    [workspaceId]
+  );
+  return rows.map(toScheduleRecord);
+}
+
+export async function dbDeleteAnalyticsSchedule(workspaceId: string, id: string): Promise<boolean> {
+  const rows = await queryService<{ id: string }>(
+    'DELETE FROM octo.analytics_schedules WHERE workspace_id = $1 AND id = $2 RETURNING id',
+    [workspaceId, id]
+  );
+  return rows.length > 0;
+}
+
+/** Enabled schedules whose next run time has passed, across all workspaces. */
+export async function dbListDueAnalyticsSchedules(limit = 50): Promise<AnalyticsScheduleRecord[]> {
+  const rows = await queryService<Record<string, unknown>>(
+    `SELECT ${SCHEDULE_COLUMNS} FROM octo.analytics_schedules
+     WHERE enabled AND next_run_at <= now()
+     ORDER BY next_run_at LIMIT $1`,
+    [limit]
+  );
+  return rows.map(toScheduleRecord);
+}
+
+/** Moves a schedule's clock forward and records the dataset version it last ran on. */
+export async function dbMarkAnalyticsScheduleRan(
+  id: string,
+  everyMinutes: number,
+  datasetVersionId: string | null
+): Promise<void> {
+  await queryService(
+    `UPDATE octo.analytics_schedules
+     SET next_run_at = now() + make_interval(mins => $2),
+         last_dataset_version_id = COALESCE($3::uuid, last_dataset_version_id)
+     WHERE id = $1`,
+    [id, everyMinutes, datasetVersionId]
+  );
 }
 
 export async function dbGetAnalyticsJob(workspaceId: string, jobId: string): Promise<DbJobRow | null> {
