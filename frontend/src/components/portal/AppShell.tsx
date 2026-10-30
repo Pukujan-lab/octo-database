@@ -202,7 +202,7 @@ export function AppShell({
                 <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               </div>
 
-              <Button type="button" size="sm" variant="outline" onClick={onNewWorkspace} aria-label="New workspace" className="h-9 gap-1.5">
+              <Button type="button" size="sm" variant="outline" onClick={onNewWorkspace} aria-label="New Workspace" className="h-9 gap-1.5">
                 <Plus className="h-4 w-4" />
                 <span className="hidden sm:inline">New Workspace</span>
               </Button>
