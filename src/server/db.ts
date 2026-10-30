@@ -797,6 +797,59 @@ export async function dbVerifyApiKey(keyHash: string): Promise<{
   return rows[0] ?? null;
 }
 
+/** Appends one key-use row; returns true when an established key shows up from an IP it has never used (#362). */
+export async function dbRecordKeyUse(
+  keyId: string,
+  principalId: string | null,
+  sourceIp: string | null,
+  method: string | null,
+  route: string | null,
+  outcome: 'ok' | 'revoked' | 'expired'
+): Promise<{ newIp: boolean; firstAlertThisHour: boolean }> {
+  // A key's IP baseline is what it used in the 7 days after its first logged use.
+  const rows = await queryService<{ newIp: boolean; firstAlertThisHour: boolean }>(
+    `WITH prior AS (
+       SELECT
+         (SELECT min(used_at) FROM octo.agent_key_uses WHERE key_id = $1 AND outcome = 'ok') AS first_use,
+         EXISTS (SELECT 1 FROM octo.agent_key_uses WHERE key_id = $1 AND source_ip = $3 AND outcome = 'ok') AS ip_seen,
+         EXISTS (SELECT 1 FROM octo.agent_key_uses WHERE key_id = $1 AND outcome = $6
+                   AND used_at > now() - interval '1 hour') AS alerted_recently
+     ), ins AS (
+       INSERT INTO octo.agent_key_uses (key_id, principal_id, source_ip, method, route, outcome)
+       VALUES ($1, $2, $3, $4, $5, $6)
+     )
+     SELECT ($6 = 'ok' AND $3::text IS NOT NULL AND first_use < now() - interval '7 days' AND NOT ip_seen) AS "newIp",
+            NOT alerted_recently AS "firstAlertThisHour"
+     FROM prior`,
+    [keyId, principalId, sourceIp, method, route, outcome]
+  );
+  return rows[0] ?? { newIp: false, firstAlertThisHour: false };
+}
+
+/** Looks up a key hash that no longer verifies: a revoked (deleted) or an expired key. */
+export async function dbFindDeadApiKey(keyHash: string): Promise<{
+  keyId: string;
+  prefix: string | null;
+  principalId: string | null;
+  outcome: 'revoked' | 'expired';
+} | null> {
+  const rows = await queryService<{
+    keyId: string;
+    prefix: string | null;
+    principalId: string | null;
+    outcome: 'revoked' | 'expired';
+  }>(
+    `SELECT id AS "keyId", prefix, principal_id AS "principalId", 'expired' AS outcome
+       FROM octo.api_keys WHERE key_hash = $1 AND expires_at <= now()
+     UNION ALL
+     SELECT key_id, prefix, principal_id, 'revoked'
+       FROM octo.revoked_api_keys WHERE key_hash = $1
+     LIMIT 1`,
+    [keyHash]
+  );
+  return rows[0] ?? null;
+}
+
 export async function dbListApiKeys(
   principalId: string,
   workspaceId?: string
@@ -2551,18 +2604,6 @@ export async function dbClearMfa(principalId: string): Promise<void> {
   );
 }
 
-/** The id of a principal's account-wide key, or null. Enforces the one-key rule. */
-export async function dbGetAccountWideKeyId(principalId: string): Promise<string | null> {
-  // An account-wide key has workspace_id NULL by definition, so a scoped key's fence
-  // would hide it. This is a pre-mint existence check for the one-key rule, not tenant
-  // data; it reads the caller's own key row on the trusted path.
-  const rows = await queryService<{ id: string }>(
-    'SELECT id FROM octo.api_keys WHERE principal_id = $1 AND workspace_id IS NULL LIMIT 1',
-    [principalId]
-  );
-  return rows[0]?.id ?? null;
-}
-
 /** Workspaces that have a retention window set, for the archive sweep. */
 export async function dbListRetentionWorkspaces(): Promise<{ id: string; retentionDays: number }[]> {
   return queryService<{ id: string; retentionDays: number }>(
@@ -3224,8 +3265,8 @@ export async function dbRevokeVaultLease(principalId: string, leaseId: string): 
 
 /**
  * Mints a lease for a grant. The agent has no session, so this runs on the
- * service pool. An active lease for the same (grant, item) is rotated out in
- * the same transaction, which the partial unique index also enforces.
+ * service pool. Other live leases for the same (grant, item) stay valid, so
+ * each consumer can hold its own key.
  */
 export async function dbInsertVaultLeaseService(input: {
   id: string;
@@ -3242,35 +3283,27 @@ export async function dbInsertVaultLeaseService(input: {
   bodyField: string | null;
   basicUsername: string | null;
 }): Promise<void> {
-  await withTransaction(async (client) => {
-    await client.query(
-      `UPDATE octo.vault_leases
-       SET revoked_at = now()
-       WHERE parent_grant_id = $1 AND item_id = $2 AND revoked_at IS NULL`,
-      [input.parentGrantId, input.itemId]
-    );
-    await client.query(
-      `INSERT INTO octo.vault_leases (
-         id, principal_id, item_id, parent_grant_id, key_hash, prefix, name, expires_at,
-         base_url, auth_scheme, auth_header, body_field, basic_username
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-      [
-        input.id,
-        input.principalId,
-        input.itemId,
-        input.parentGrantId,
-        input.keyHash,
-        input.prefix,
-        input.name,
-        input.expiresAt,
-        input.baseUrl,
-        input.authScheme,
-        input.authHeader,
-        input.bodyField,
-        input.basicUsername,
-      ]
-    );
-  }, servicePool);
+  await queryService(
+    `INSERT INTO octo.vault_leases (
+       id, principal_id, item_id, parent_grant_id, key_hash, prefix, name, expires_at,
+       base_url, auth_scheme, auth_header, body_field, basic_username
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [
+      input.id,
+      input.principalId,
+      input.itemId,
+      input.parentGrantId,
+      input.keyHash,
+      input.prefix,
+      input.name,
+      input.expiresAt,
+      input.baseUrl,
+      input.authScheme,
+      input.authHeader,
+      input.bodyField,
+      input.basicUsername,
+    ]
+  );
 }
 
 /** Extends a live lease. Returns the new expiry, or null when it is gone. */
