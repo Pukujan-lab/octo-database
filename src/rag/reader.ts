@@ -8,7 +8,9 @@
  * and the reference the number check compares passages against.
  *
  * Env:
- *   OCTO_READER_URL     OpenAI-compatible base URL, e.g. http://host.docker.internal:8090/v1
+ *   OCTO_READER_URL     OpenAI-compatible base URL, e.g. http://host.docker.internal:8090/v1.
+ *                       Several comma-separated URLs are tried in order; each file uses
+ *                       the first one that answers (e.g. a GPU machine, then a local one).
  *   OCTO_READER_MODEL   model name sent to the server (default paddleocr-vl)
  *   OCTO_READER_PROMPT  task prompt (default "OCR:")
  */
@@ -22,19 +24,40 @@ import { promisify } from 'util';
 const run = promisify(execFile);
 
 export interface ReaderConfig {
-  baseUrl: string;
+  /** Reader base URLs in the order they are tried. */
+  baseUrls: string[];
   model: string;
   prompt: string;
 }
 
 export function loadReaderConfigFromEnv(): ReaderConfig | null {
-  const baseUrl = process.env['OCTO_READER_URL'];
-  if (!baseUrl) return null;
+  const baseUrls = (process.env['OCTO_READER_URL'] ?? '')
+    .split(',')
+    .map((url) => url.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+  if (baseUrls.length === 0) return null;
   return {
-    baseUrl: baseUrl.replace(/\/+$/, ''),
+    baseUrls,
     model: process.env['OCTO_READER_MODEL'] ?? 'paddleocr-vl',
     prompt: process.env['OCTO_READER_PROMPT'] ?? 'OCR:',
   };
+}
+
+/**
+ * Returns the first reader that answers `GET /models` within a few seconds. A
+ * reader that starts its model on demand (llama-swap) answers this before the
+ * model is loaded, so a cold GPU machine still wins over a warm fallback.
+ */
+export async function pickReaderUrl(baseUrls: string[]): Promise<string> {
+  for (const baseUrl of baseUrls) {
+    try {
+      const response = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(5000) });
+      if (response.ok) return baseUrl;
+    } catch {
+      // Unreachable (machine off or asleep): try the next one.
+    }
+  }
+  throw new Error(`no reader answered: ${baseUrls.join(', ')}`);
 }
 
 export interface PdfPage {
@@ -46,8 +69,8 @@ export interface PdfPage {
 }
 
 /** Sends one page image to the reader and returns its Markdown. */
-export async function readPageImage(config: ReaderConfig, png: Buffer): Promise<string> {
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+export async function readPageImage(config: ReaderConfig, baseUrl: string, png: Buffer): Promise<string> {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -99,8 +122,9 @@ export async function readPdf(bytes: Buffer, reader: ReaderConfig | null): Promi
       .filter((f) => Number.isInteger(f.page) && f.page > 0)
       .sort((a, b) => a.page - b.page);
 
+    const baseUrl = await pickReaderUrl(reader.baseUrls);
     for (const image of images) {
-      const markdown = await readPageImage(reader, await readFile(join(dir, image.name)));
+      const markdown = await readPageImage(reader, baseUrl, await readFile(join(dir, image.name)));
       const existing = pages[image.page - 1];
       if (existing) existing.markdown = markdown;
       else pages[image.page - 1] = { page: image.page, textLayer: '', markdown };
