@@ -46,6 +46,7 @@ import { useConfirmChallenge } from "@/hooks/useConfirmChallenge";
 import { api, errorCode, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { MeResponse, Workspace } from "@/lib/types";
+import { confirmWindowOpen } from "@/lib/confirm-window";
 import { toast } from "@/utils/toast";
 
 type Kind = "login" | "token" | "url" | "note";
@@ -278,6 +279,7 @@ export function VaultView({
   /** The gate is no longer a panel on the page: it opens the moment a write needs it. */
   const gate: GateBody = () => {
     const secret = typed.trim();
+    if (!secret && confirmWindowOpen()) return { confirmSecret: "" };
     const needsMfa = Boolean(me?.mfaEnabled) && !mfaCode.trim();
     if (!secret || needsMfa) {
       setGateOpen(true);
