@@ -113,7 +113,13 @@ export function blocks(md: string): Block[] {
         heading = paraLines[0]!.replace(/^#+\s*/, '').trim();
         rest = paraLines.slice(1).join('\n');
       }
-      const text = clean(rest);
+      // Keep line breaks: whole-page OCR prints one table row per line, with wide
+      // gaps between columns, which become " | " like the other table formats.
+      const text = rest
+        .split('\n')
+        .map((l) => clean(l.replace(/[ \t]{3,}/g, ' | ')))
+        .filter((l) => l.length > 0)
+        .join('\n');
       if (text) out.push({ heading, lines: [text], isTable: false });
     }
   }

@@ -24,6 +24,13 @@ describe('Reader passages (#365)', () => {
     expect(passages(md, 1)[0]!.text).toBe('Status | Amount\nSingle | 14,600');
   });
 
+  it('keeps whole-page OCR rows apart, column gaps as " | "', () => {
+    const md = 'Table 1. Standard Deduction\nFiling status        Amount\nSingle        $14,600\nHead of household     $21,900';
+    expect(passages(md, 3)[0]!.text).toBe(
+      'Table 1. Standard Deduction\nFiling status | Amount\nSingle | $14,600\nHead of household | $21,900'
+    );
+  });
+
   it('flags numbers the page text layer does not contain', () => {
     expect(unknownNumbers('Single | 14,600', 'Single   14600')).toEqual([]);
     expect(unknownNumbers('Single | 14,800', 'Single   14,600')).toEqual(['14,800']);
