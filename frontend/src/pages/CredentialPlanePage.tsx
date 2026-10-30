@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { Hexagon } from "lucide-react";
 import { Link } from "react-router-dom";
 import { INTEGRATION_GUIDE_URL } from "@/components/landing/links";
@@ -17,6 +17,10 @@ import { CloseSection } from "@/components/credential-plane/CloseSection";
  */
 export function CredentialPlanePage() {
   useForcedDark();
+
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   useEffect(() => {
     const previous = document.title;

@@ -3,6 +3,7 @@ import { ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SignInCard } from "@/components/portal/SignInCard";
 import { INTEGRATION_GUIDE_URL } from "./links";
+import { SIGNAL_ACTION } from "@/components/credential-plane/styles";
 import type { Health } from "@/lib/types";
 
 const PROOF = [
@@ -54,18 +55,15 @@ export function LandingHero({
 
           <Link
             to="/credential-plane"
-            className="group mt-9 flex items-center justify-between gap-4 border border-border px-4 py-3 transition-colors duration-500 hover:border-info/50"
+            className={`${SIGNAL_ACTION} mt-9 w-full max-w-xl justify-between gap-5 text-left`}
           >
-            <span className="flex min-w-0 items-baseline gap-3">
-              <span className="eyebrow shrink-0 text-info/80">New</span>
-              <span className="truncate font-display text-sm font-semibold tracking-tight">
-                The credential plane
+            <span className="flex min-w-0 flex-col items-start gap-1">
+              <span className="font-display text-base">Explore secret storage</span>
+              <span className="text-xs font-normal leading-relaxed text-muted-foreground">
+                Give agents access without exposing the stored key.
               </span>
             </span>
-            <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground transition-colors duration-500 group-hover:text-info">
-              <span className="hidden sm:inline">Give it everything. Hand it nothing.</span>
-              <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={1.5} />
-            </span>
+            <ArrowUpRight className="h-4 w-4 shrink-0" strokeWidth={1.5} />
           </Link>
 
           <dl className="mt-10 grid grid-cols-1 divide-y divide-border border-t border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
