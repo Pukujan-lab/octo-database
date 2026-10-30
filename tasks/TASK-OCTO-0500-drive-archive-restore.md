@@ -1,11 +1,11 @@
 # OCTO-0500 R2-to-Google-Drive archive lifecycle and restore
 
-<!-- continuity:task {"acceptance":["Google Drive OAuth 2.0 refresh token authorization against drive.file scope","Cloudflare R2 active storage integration with dedicated octo bucket","3 guest workspaces verified end-to-end archiving active R2 files to Google Drive","Restoration of archived files from Google Drive back to R2 active tier with byte-for-byte fidelity","Cross-workspace storage path isolation across all 3 guest accounts","All gates pass across Python, TypeScript, and JSON contracts"],"depends_on":["OCTO-0200"],"goal":"Connect Google Drive OAuth 2.0 and Cloudflare R2 active storage to provide verified file archival, restore, and cross-workspace isolation across guest and owner workspaces","id":"OCTO-0500","issue_url":"https://github.com/Pukujan/octo-database/issues/7","next_action":"Delivered in PR #39 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Enable cold archiving of active R2 workspace files into Google Drive (5TB personal storage tier) and byte-perfect restoration per Slice 5 and Issue #7."} -->
+<!-- continuity:task {"acceptance":["Google Drive OAuth 2.0 refresh token authorization against drive.file scope","Cloudflare R2 active storage integration with dedicated octo bucket","3 guest workspaces verified end-to-end archiving active R2 files to Google Drive","Restoration of archived files from Google Drive back to R2 active tier with byte-for-byte fidelity","Cross-workspace storage path isolation across all 3 guest accounts","All gates pass across Python, TypeScript, and JSON contracts"],"depends_on":["OCTO-0200"],"goal":"Connect Google Drive OAuth 2.0 and Cloudflare R2 active storage to provide verified file archival, restore, and cross-workspace isolation across guest and owner workspaces","id":"OCTO-0500","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/7","next_action":"Delivered in PR #39 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Enable cold archiving of active R2 workspace files into Google Drive (5TB personal storage tier) and byte-perfect restoration per Slice 5 and Issue #7."} -->
 
 - Status: completed
 - Priority: P1
 - Branch: `task/OCTO-0500-archive-lifecycle`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/7
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/7
 
 ## Correction
 

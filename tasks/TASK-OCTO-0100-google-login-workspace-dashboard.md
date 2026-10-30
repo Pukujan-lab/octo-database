@@ -1,11 +1,11 @@
 # OCTO-0100 Google login, workspace entry, and simple control dashboard
 
-<!-- continuity:task {"acceptance":["approved owner signs in with Google","Octo creates/resolves one stable user principal","dashboard lists exactly authorized workspaces","entering Personal works","second unapproved account cannot enumerate or access Personal by URL/API guessing","logout/session revocation blocks subsequent access","browser contains no service-role/master credential","frontend type checking and tests pass"],"depends_on":["OCTO-0001"],"goal":"Deliver Google login, workspace entry, and simple control dashboard","id":"OCTO-0100","issue_url":"https://github.com/Pukujan/octo-database/issues/3","next_action":"Merged in PR #20 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Establish canonical principal and workspace boundary for personal control plane."} -->
+<!-- continuity:task {"acceptance":["approved owner signs in with Google","Octo creates/resolves one stable user principal","dashboard lists exactly authorized workspaces","entering Personal works","second unapproved account cannot enumerate or access Personal by URL/API guessing","logout/session revocation blocks subsequent access","browser contains no service-role/master credential","frontend type checking and tests pass"],"depends_on":["OCTO-0001"],"goal":"Deliver Google login, workspace entry, and simple control dashboard","id":"OCTO-0100","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/3","next_action":"Merged in PR #20 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Establish canonical principal and workspace boundary for personal control plane."} -->
 
 - Status: completed
 - Priority: P1
 - Branch: `task/OCTO-0100-google-login-workspace-dashboard`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/3
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/3
 
 ## Goal
 

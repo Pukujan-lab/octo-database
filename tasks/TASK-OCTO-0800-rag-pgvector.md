@@ -1,11 +1,11 @@
 # OCTO-0800 Normal RAG with PostgreSQL/pgvector
 
-<!-- continuity:task {"acceptance":["documents and versions tracked with content hashes so re-ingest is idempotent","embedding configurations coexist as immutable rows rather than being overwritten","deterministic chunk keys produce stable derived rows on repeat runs","workspace-scoped semantic retrieval filters chunks in SQL so cross-workspace queries never return another's chunks","deleting derived embeddings and chunks leaves documents, versions, and configs intact","text extraction refuses unsupported binaries rather than indexing garbage","no separate vector database required"],"depends_on":["OCTO-0200","OCTO-0700"],"goal":"Add retrieval capability using document extraction, chunking, embedding metadata, and pgvector","id":"OCTO-0800","issue_url":"https://github.com/Pukujan/octo-database/issues/10","next_action":"Merged in PR #36 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Let agents retrieve relevant workspace chunks with provenance back to the exact source and config."} -->
+<!-- continuity:task {"acceptance":["documents and versions tracked with content hashes so re-ingest is idempotent","embedding configurations coexist as immutable rows rather than being overwritten","deterministic chunk keys produce stable derived rows on repeat runs","workspace-scoped semantic retrieval filters chunks in SQL so cross-workspace queries never return another's chunks","deleting derived embeddings and chunks leaves documents, versions, and configs intact","text extraction refuses unsupported binaries rather than indexing garbage","no separate vector database required"],"depends_on":["OCTO-0200","OCTO-0700"],"goal":"Add retrieval capability using document extraction, chunking, embedding metadata, and pgvector","id":"OCTO-0800","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/10","next_action":"Merged in PR #36 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Let agents retrieve relevant workspace chunks with provenance back to the exact source and config."} -->
 
 - Status: completed
 - Priority: P1
 - Branch: `task/OCTO-0800-rag-pgvector`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/10
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/10
 
 ## Goal
 

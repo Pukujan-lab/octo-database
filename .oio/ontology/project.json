@@ -1,6 +1,6 @@
 {
   "schema_version": "oio.project-issue-log-ontology.v1",
-  "project_id": "Pukujan/octo-database",
+  "project_id": "Pukujan-lab/octo-database",
   "namespace": "pukujan-octo-database",
   "extends": {
     "ontology_id": "oio:issue-log",

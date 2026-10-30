@@ -20,7 +20,7 @@
     "AGENTS.md",
     "checkpoints/CURRENT.md",
     "HANDOFF.md",
-    "https://github.com/Pukujan/octo-database/issues/1"
+    "https://github.com/Pukujan-lab/octo-database/issues/1"
   ],
   "review_outputs": [],
   "adoption_status": "bootstrap adapter pinned; implementation evidence will be appended through accepted issues/PRs"

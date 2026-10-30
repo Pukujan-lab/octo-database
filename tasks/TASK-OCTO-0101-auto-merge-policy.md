@@ -1,11 +1,11 @@
 # OCTO-0101 Hands-off auto-merge policy
 
-<!-- continuity:task {"acceptance":["repository auto-merge is enabled","main requires only the aggregate gates check","no review approval is required on main","branches are not required to be up to date, so a PR merges as soon as gates is green","AGENTS.md states auto-merge is mandatory and requires no human approval","an automated workflow arms auto-merge on every same-repo pull request"],"depends_on":["OCTO-0001"],"goal":"Make auto-merge fully automatic for every agent with no extra approval requirement","id":"OCTO-0101","issue_url":"https://github.com/Pukujan/octo-database/issues/2","next_action":"Continue with the next accepted slice.","owner":"Pukujan","priority":"P0","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"The owner requires every agent to merge automatically without an approval step."} -->
+<!-- continuity:task {"acceptance":["repository auto-merge is enabled","main requires only the aggregate gates check","no review approval is required on main","branches are not required to be up to date, so a PR merges as soon as gates is green","AGENTS.md states auto-merge is mandatory and requires no human approval","an automated workflow arms auto-merge on every same-repo pull request"],"depends_on":["OCTO-0001"],"goal":"Make auto-merge fully automatic for every agent with no extra approval requirement","id":"OCTO-0101","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/2","next_action":"Continue with the next accepted slice.","owner":"Pukujan","priority":"P0","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"The owner requires every agent to merge automatically without an approval step."} -->
 
 - Status: completed
 - Priority: P0
 - Branch: `task/OCTO-0101-auto-merge-policy`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/2
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/2
 
 ## Goal
 
