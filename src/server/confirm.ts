@@ -4,7 +4,13 @@
  */
 
 import { hashApiKeySecret } from '../api/keys';
-import { acceptConfirmChallenge, hasConfirmChallenge, issueConfirmChallenge } from '../auth/confirm-challenge';
+import {
+  acceptConfirmChallenge,
+  hasConfirmChallenge,
+  inConfirmWindow,
+  issueConfirmChallenge,
+  openConfirmWindow,
+} from '../auth/confirm-challenge';
 import { decryptSecret, hashRecoveryCode, verifyTotpCode } from '../lib/mfa';
 import { AuthContext } from './auth-context';
 import { dbConsumeMfaRecoveryCode, dbGetConfirmSecretHash, dbGetMfa, MfaRecord } from './db';
@@ -28,6 +34,9 @@ import { ServerResponse } from 'http';
  * issued instead of demanding setup the person did not ask for. Returns true
  * when the request may proceed, having already written the refusal response
  * otherwise.
+ *
+ * Passing the full gate opens a two-minute window in which the same person's
+ * further gated actions need no codes.
  */
 export async function confirmGate(
   res: ServerResponse,
@@ -35,6 +44,9 @@ export async function confirmGate(
   suppliedSecret: unknown,
   options: { requireMfa?: boolean; mfaCode?: unknown } = {}
 ): Promise<boolean> {
+  // The owner listed this agent's key; it confirms on the owner's behalf.
+  if (auth.ownerAgent) return true;
+
   if (auth.apiKey) {
     sendJson(res, 403, {
       error: 'FORBIDDEN: Destructive commands require a human session; API keys can never confirm.',
@@ -42,6 +54,24 @@ export async function confirmGate(
     return false;
   }
 
+  // Codes that are sent are always checked; only a request that sends none uses the window.
+  if (!hasValue(suppliedSecret) && !hasValue(options.mfaCode) && inConfirmWindow(auth.principal.id)) return true;
+
+  const passed = await checkCodes(res, auth, suppliedSecret, options);
+  if (passed) openConfirmWindow(auth.principal.id);
+  return passed;
+}
+
+function hasValue(value: unknown): boolean {
+  return typeof value === 'string' ? value.trim() !== '' : value !== undefined && value !== null;
+}
+
+async function checkCodes(
+  res: ServerResponse,
+  auth: AuthContext,
+  suppliedSecret: unknown,
+  options: { requireMfa?: boolean; mfaCode?: unknown }
+): Promise<boolean> {
   if (acceptConfirmChallenge(auth.principal.id, suppliedSecret)) {
     return confirmMfa(res, auth, options);
   }

@@ -68,4 +68,49 @@ export interface AnalyticsRows {
   rows: Array<Record<string, unknown>>;
   rowCount: number;
   truncated: boolean;
+  /** DuckDB type name per column, in column order. */
+  columnTypes: string[];
+}
+
+/** Parameter types a workspace spec may declare; date and timestamp bind as text. */
+export type SpecParamType = 'text' | 'integer' | 'double' | 'boolean' | 'date' | 'timestamp';
+
+export interface SpecParam {
+  name: string;
+  type: SpecParamType;
+}
+
+/** One immutable version of a workspace-registered query spec. */
+export interface WorkspaceSpecRecord {
+  id: string;
+  slug: string;
+  version: number;
+  /** The id a query submits: `ws:<slug>@<version>`. */
+  specId: string;
+  sql: string;
+  params: SpecParam[];
+  createdAt: string;
+}
+
+/** Where a scheduled run writes its rows: `analytics.<table>` in the workspace database. */
+export interface AnalyticsSink {
+  table: string;
+  mode: 'replace' | 'upsert';
+  /** Key columns; required for `upsert`. */
+  keys: string[];
+}
+
+export interface AnalyticsScheduleRecord {
+  id: string;
+  spec: string;
+  dataset: string;
+  params: Record<string, string | number | boolean>;
+  everyMinutes: number;
+  sink: AnalyticsSink;
+  enabled: boolean;
+  lastDatasetVersionId: string | null;
+  nextRunAt: string;
+  createdBy: string | null;
+  workspaceId: string;
+  createdAt: string;
 }

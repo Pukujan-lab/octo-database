@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { OctoApi } from './client';
 
 function asText(value: unknown): { content: Array<{ type: 'text'; text: string }> } {
-  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+  return { content: [{ type: 'text', text: JSON.stringify(value) }] };
 }
 
 function asError(error: unknown): {
@@ -25,6 +25,82 @@ function asError(error: unknown): {
   return { isError: true, content: [{ type: 'text', text: message }] };
 }
 
+/** Topic text for the `guide` tool; kept out of the connect-time instructions. */
+const GUIDE_TOPICS: Record<string, string> = {
+  workspaces:
+    "A workspace's durable data lives in Octo. Provision its database through Octo and reach it with query_workspace_database (the Octo token only, no connection string), or with the connection string provision_database returns once. A workspace-scoped key (octo_live_ws_) reaches only its own workspace and cannot create workspaces or mint keys; an account-wide key (octo_live_acc_) manages every workspace the principal belongs to.",
+  ledger:
+    'The epistemic ledger is append-only and bitemporal: record_epistemic writes; query_claims_as_of and query_belief_as_of read as of a recorded-time and/or valid-time instant.',
+  analytics:
+    'register_dataset registers immutable Parquet versions (append: true adds new date partitions to the newest one). query_dataset runs a named spec: the built-in job-failures-by-type-month@1, or a workspace spec ws:<slug>@<n> registered with register_analytics_spec, with its params. Poll get_analytics_query_status, then get_analytics_result. register_analytics_spec registers your own SELECT; schedule_analytics runs a spec on an interval and writes the rows into analytics.<table> in the workspace database.',
+  keys: 'mint_key is human-stamped: it needs a session with the confirmation secret. A token can only narrow its own authority, never widen scopes or escape its workspace. The raw secret is shown exactly once.',
+};
+
+/**
+ * The capability action each tool needs (see OCTO_CAPABILITIES). A tool with no
+ * entry is always listed.
+ */
+export const TOOL_ACTIONS: Record<string, string> = {
+  list_workspaces: 'workspaces.list',
+  create_workspace: 'workspaces.create',
+  provision_database: 'workspaces.provision_database',
+  query_workspace_database: 'workspaces.query',
+  list_files: 'files.list',
+  upload_file: 'files.upload',
+  download_file: 'files.download',
+  delete_file: 'files.delete',
+  ingest_document: 'rag.ingest',
+  list_documents: 'rag.list',
+  get_document: 'rag.get',
+  rename_document: 'rag.rename',
+  delete_document: 'rag.delete',
+  query_graph: 'graph.query',
+  project_graph: 'graph.project',
+  graph_health: 'graph.health',
+  record_epistemic: 'epistemic.record',
+  query_claims_as_of: 'epistemic.claims_as_of',
+  query_belief_as_of: 'epistemic.belief_as_of',
+  list_ops_events: 'ops.list',
+  get_ops_summary: 'ops.summary',
+  retry_job: 'jobs.enqueue',
+  register_dataset: 'datasets.register',
+  query_dataset: 'analytics.query',
+  get_analytics_query_status: 'analytics.query_status',
+  get_analytics_result: 'analytics.result',
+  register_analytics_spec: 'analytics.register_spec',
+  list_analytics_specs: 'analytics.specs',
+  schedule_analytics: 'analytics.schedule',
+  list_analytics_schedules: 'analytics.schedules',
+};
+
+/**
+ * Hides every tool the calling key cannot use, from GET /api/capabilities. Call
+ * it once the server is built; if the lookup fails every tool stays listed and
+ * the API still refuses what the key may not do.
+ */
+export async function restrictToCapabilities(server: McpServer, api: OctoApi): Promise<number> {
+  let actions: Set<string>;
+  try {
+    const body = (await api.capabilities()) as { capabilities?: Array<{ action?: string }> };
+    if (!Array.isArray(body?.capabilities)) return 0;
+    actions = new Set(body.capabilities.map((capability) => String(capability.action)));
+  } catch {
+    return 0;
+  }
+  const registered = (server as unknown as {
+    _registeredTools: Record<string, { disable(): void }>;
+  })._registeredTools;
+  let hidden = 0;
+  for (const [name, tool] of Object.entries(registered)) {
+    const action = TOOL_ACTIONS[name];
+    if (action && !actions.has(action)) {
+      tool.disable();
+      hidden += 1;
+    }
+  }
+  return hidden;
+}
+
 export function createOctoMcpServer(api: OctoApi): McpServer {
   // Orientation the client receives at connect time, so an agent does not have to
   // learn the platform's rules by trial. Mirrors docs/consuming-octo.md.
@@ -32,13 +108,20 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
     { name: 'octo', version: '0.1.0' },
     {
       instructions: [
-        'Octo is a self-hosted workspace data platform and the data layer for the projects it serves.',
-        "A workspace's durable data lives in Octo: do not stand up a separate database for a project Octo serves. Provision the workspace database through Octo and reach it with query_workspace_database, or with its own connection string.",
-        'A workspace-scoped key (octo_live_ws_) reaches only its own workspace and cannot create workspaces or mint keys — both are human-stamped. An account-wide key (octo_live_acc_) manages every workspace the principal belongs to.',
-        'The epistemic ledger is append-only and bitemporal: record_epistemic writes; query_claims_as_of and query_belief_as_of read as of a recorded-time and/or valid-time instant.',
-        'Historical analytics is register_dataset (immutable Parquet versions) then query_dataset (a named spec, never SQL), polled with get_analytics_query_status and downloaded with get_analytics_result.',
+        'Octo is a self-hosted workspace data platform and the data layer for the projects it serves: do not stand up a separate database for a project Octo serves.',
+        'Only the tools your key can use are listed. Call guide with a topic (workspaces, ledger, analytics, keys) for how a surface works.',
         "Octo's repository is read-only to adopters: propose a change as an OIO observational issue, never a pull request.",
       ].join(' '),
+    }
+  );
+
+  server.tool(
+    'guide',
+    'How an Octo surface works, on demand. Topics: workspaces, ledger, analytics, keys. Call with no topic to list them.',
+    { topic: z.string().optional().describe('workspaces, ledger, analytics or keys') },
+    async ({ topic }) => {
+      const text = topic ? GUIDE_TOPICS[topic] : undefined;
+      return asText(text ? { topic, guide: text } : { topics: Object.keys(GUIDE_TOPICS) });
     }
   );
 
@@ -203,15 +286,23 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
 
   server.tool(
     'query_workspace',
-    'Answer a natural-language question from a workspace\'s indexed documents.',
+    'Answer a natural-language question from a workspace\'s indexed documents. Each match carries documentId, title, versionNumber and page (PDFs). The optional filter narrows the search before its limit.',
     {
       workspaceId: z.string().describe('The workspace to query'),
       query: z.string().describe('The question to answer'),
       limit: z.number().int().positive().optional().describe('Maximum number of passages to retrieve'),
+      filter: z
+        .object({
+          documentIds: z.array(z.string()).optional().describe('Only these documents'),
+          titlePrefix: z.string().optional().describe('Only documents whose title starts with this'),
+          latestVersionOnly: z.boolean().optional().describe('Only each document\'s newest version'),
+        })
+        .optional()
+        .describe('Restrict which documents are searched'),
     },
-    async ({ workspaceId, query, limit }) => {
+    async ({ workspaceId, query, limit, filter }) => {
       try {
-        return asText(await api.query({ workspaceId, query, limit }));
+        return asText(await api.query({ workspaceId, query, limit, filter }));
       } catch (error) {
         return asError(error);
       }
@@ -220,16 +311,17 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
 
   server.tool(
     'ingest_document',
-    'Index a text document into a workspace so query_workspace can retrieve it. Chunks and embeds the text server-side; re-ingesting identical content is a no-op. Uploads via upload_file are NOT indexed automatically — use this tool to make text searchable. Requires the write scope and an operator or higher role.',
+    'Index a document into a workspace so query_workspace can retrieve it. Give title and text to index text now, or fileId to index an uploaded file (PDF or text) in the background; that returns a job. PDF and text uploads are also indexed automatically when embeddings are configured. Requires the write scope and an operator or higher role.',
     {
       workspaceId: z.string().describe('The workspace to ingest into'),
-      title: z.string().describe('Document title (unique per workspace)'),
-      text: z.string().describe('The document text to index'),
+      title: z.string().optional().describe('Document title (unique per workspace; defaults to the file name for fileId)'),
+      text: z.string().optional().describe('The document text to index'),
       mimeType: z.string().optional().describe('MIME type (defaults to text/plain)'),
+      fileId: z.string().optional().describe('An uploaded file to index instead of text'),
     },
-    async ({ workspaceId, title, text, mimeType }) => {
+    async ({ workspaceId, title, text, mimeType, fileId }) => {
       try {
-        return asText(await api.ingestDocument({ workspaceId, title, text, mimeType }));
+        return asText(await api.ingestDocument({ workspaceId, title, text, mimeType, fileId }));
       } catch (error) {
         return asError(error);
       }
@@ -474,7 +566,7 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
 
   server.tool(
     'register_dataset',
-    'Register an immutable Parquet dataset version for historical analytics. Supply base64-encoded Parquet parts, the declared column schema, and provenance; the server inspects every footer, rejects a mismatch, assigns the next version, and derives the object keys itself. A re-export is a new version, never a mutation. The schema must carry the query spec inputs (job-failures-by-type-month@1: job_type TEXT, state TEXT, created_at TIMESTAMP). Requires the write scope.',
+    'Register an immutable Parquet dataset version for historical analytics. Supply base64-encoded Parquet parts, the declared column schema, and provenance; the server inspects every footer, rejects a mismatch, assigns the next version, and derives the object keys itself. A re-export is a new version, never a mutation. Any schema is accepted; the built-in spec job-failures-by-type-month@1 needs job_type TEXT, state TEXT, created_at TIMESTAMP. Pass append: true to add new date partitions to the newest version without re-uploading earlier ones. Requires the write scope.',
     {
       workspaceId: z.string().describe('The workspace that owns the dataset'),
       dataset: z.string().describe('Lowercase dataset slug ([a-z0-9-]), stable across versions'),
@@ -487,11 +579,12 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
         .describe('Where the export came from: at least { source, exportedAt }'),
       watermark: z.string().optional().describe('Newest source instant included in the export'),
       idempotencyKey: z.string().optional().describe('Retry key; a repeat returns the same version'),
+      append: z.boolean().optional().describe('Extend the newest version with these new partitions'),
       parts: z
         .array(z.object({ partition: z.string(), dataBase64: z.string() }))
         .describe('Parquet parts: partition is a YYYY-MM-DD date, dataBase64 is the file bytes'),
     },
-    async ({ workspaceId, dataset, name, schema, provenance, watermark, idempotencyKey, parts }) => {
+    async ({ workspaceId, dataset, name, schema, provenance, watermark, idempotencyKey, append, parts }) => {
       try {
         return asText(
           await api.registerDataset({
@@ -502,6 +595,7 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
             provenance,
             watermark,
             idempotencyKey,
+            append,
             parts,
           })
         );
@@ -513,21 +607,90 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
 
   server.tool(
     'query_dataset',
-    'Submit one named analytical query over a registered dataset version and return the enqueued job. The caller names a query spec, never SQL; the server builds the statement and runs it in the background. Available spec: job-failures-by-type-month@1 (failed jobs grouped by job_type and UTC month). Poll with get_analytics_query_status. Requires the read scope.',
+    'Submit one analytical query over a dataset and return the enqueued job. Name a built-in spec (job-failures-by-type-month@1) or a workspace spec you registered (ws:<slug>@<n>, with its params). Give either datasetVersionId or dataset (a slug, which uses the newest version, pinned at submission). Poll with get_analytics_query_status. Requires the read scope.',
     {
       workspaceId: z.string().describe('The workspace that owns the dataset'),
-      datasetVersionId: z.string().describe('The dataset version id returned by register_dataset'),
-      querySpec: z.string().describe('Named query spec, e.g. job-failures-by-type-month@1'),
-      idempotencyKey: z
-        .string()
-        .optional()
-        .describe('Retry key; defaults to analytics:<datasetVersionId>:<querySpec>'),
+      datasetVersionId: z.string().optional().describe('The dataset version id returned by register_dataset'),
+      dataset: z.string().optional().describe('Dataset slug; runs over its newest version'),
+      querySpec: z.string().describe('Spec id, e.g. job-failures-by-type-month@1 or ws:transit-error@1'),
+      params: z.record(z.string(), z.unknown()).optional().describe('Values for the spec\'s declared params'),
+      idempotencyKey: z.string().optional().describe('Retry key; defaults to one derived from the version, spec and params'),
     },
-    async ({ workspaceId, datasetVersionId, querySpec, idempotencyKey }) => {
+    async ({ workspaceId, datasetVersionId, dataset, querySpec, params, idempotencyKey }) => {
       try {
         return asText(
-          await api.submitAnalyticsQuery({ workspaceId, datasetVersionId, querySpec, idempotencyKey })
+          await api.submitAnalyticsQuery({ workspaceId, datasetVersionId, dataset, querySpec, params, idempotencyKey })
         );
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'register_analytics_spec',
+    'Register a workspace query spec: one SELECT over a dataset, which the SQL reads as the view "data", with typed $name params (text, integer, double, boolean, date, timestamp; cast dates, e.g. CAST($since AS DATE)). It is validated against the dataset\'s schema and stored as an immutable version ws:<slug>@<n>; run it with query_dataset. Requires the write scope.',
+    {
+      workspaceId: z.string().describe('The workspace'),
+      slug: z.string().describe('Spec slug ([a-z0-9-])'),
+      dataset: z.string().describe('A registered dataset slug whose schema the SQL is checked against'),
+      sql: z.string().describe('A single SELECT over the view "data"'),
+      params: z
+        .array(z.object({ name: z.string(), type: z.enum(['text', 'integer', 'double', 'boolean', 'date', 'timestamp']) }))
+        .optional()
+        .describe('Declared params; every $name in the SQL must be listed'),
+    },
+    async ({ workspaceId, slug, dataset, sql, params }) => {
+      try {
+        return asText(await api.registerAnalyticsSpec({ workspaceId, slug, dataset, sql, params }));
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'list_analytics_specs',
+    'List the workspace\'s registered analytics specs with their SQL and params. Requires the read scope.',
+    { workspaceId: z.string().describe('The workspace') },
+    async ({ workspaceId }) => {
+      try {
+        return asText(await api.listAnalyticsSpecs({ workspaceId }));
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'schedule_analytics',
+    'Run a spec on a schedule over a dataset\'s newest version and write the rows into analytics.<table> in the workspace database (replace, or upsert by key columns). Runs every everyMinutes (5 to 10080), only when a new dataset version has landed. Requires the write scope and a provisioned workspace database.',
+    {
+      workspaceId: z.string().describe('The workspace'),
+      spec: z.string().describe('Spec id, e.g. ws:transit-error@1'),
+      dataset: z.string().describe('Dataset slug'),
+      params: z.record(z.string(), z.unknown()).optional().describe('Values for the spec\'s declared params'),
+      everyMinutes: z.number().int().describe('Interval in minutes, 5 to 10080'),
+      sink: z
+        .object({ table: z.string(), mode: z.enum(['replace', 'upsert']), keys: z.array(z.string()).optional() })
+        .describe('Where results land; keys are required for upsert'),
+    },
+    async ({ workspaceId, spec, dataset, params, everyMinutes, sink }) => {
+      try {
+        return asText(await api.createAnalyticsSchedule({ workspaceId, spec, dataset, params, everyMinutes, sink }));
+      } catch (error) {
+        return asError(error);
+      }
+    }
+  );
+
+  server.tool(
+    'list_analytics_schedules',
+    'List the workspace\'s analytics schedules with their next run time and the dataset version each last ran on. Requires the read scope.',
+    { workspaceId: z.string().describe('The workspace') },
+    async ({ workspaceId }) => {
+      try {
+        return asText(await api.listAnalyticsSchedules({ workspaceId }));
       } catch (error) {
         return asError(error);
       }

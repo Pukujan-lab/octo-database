@@ -8,6 +8,7 @@
 import { handleAnalyticsRoutes } from '../routes/analytics';
 import { handleAuthRoutes } from '../routes/auth';
 import { handleCapabilitiesRoutes } from '../routes/capabilities';
+import { handleServicesRoutes } from '../routes/services';
 import { handleEpistemicRoutes } from '../routes/epistemic';
 import { handleFilesRoutes } from '../routes/files';
 import { handleGalleryRoutes } from '../routes/gallery';
@@ -66,6 +67,7 @@ const ROUTES: RouteHandler[] = [
   handleVaultRoutes,
   handleSharesRoutes,
   handleCapabilitiesRoutes,
+  handleServicesRoutes,
   handleJobsRoutes,
   handleOpsRoutes,
   handleRagRoutes,

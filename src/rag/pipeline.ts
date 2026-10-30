@@ -83,7 +83,6 @@ export function chunkText(text: string, config: ChunkConfig): Chunk[] {
 
   const size = config.chunkSize;
   const overlap = config.chunkOverlap;
-  const step = Math.max(1, size - overlap);
 
   const chunks: Chunk[] = [];
   let start = 0;
@@ -115,7 +114,9 @@ export function chunkText(text: string, config: ChunkConfig): Chunk[] {
     }
 
     if (end >= normalized.length) break;
-    start = start + step;
+    // Start the next chunk from where this one actually ended (minus the overlap),
+    // not a fixed step: an early boundary end would otherwise leave text in no chunk.
+    start = Math.max(start + 1, end - overlap);
   }
 
   return chunks;

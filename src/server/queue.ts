@@ -5,7 +5,10 @@
  */
 
 import { JobOutcome, processJob } from '../jobs/worker';
-import { dbClaimJob, dbCompleteJob, dbEnqueueFileTransition, dbEnqueueJob, dbEpistemicWatermarkService, dbFailJob, dbGetArchiveRecord, dbGetDatasetVersion, dbHasOpenFileJob, dbListAgedActiveFiles, dbListRetentionWorkspaces, dbReadEpistemicGraphService, dbRecordActivity, dbRecordOpsEvent, dbRegisterAnalyticsResult, dbUpsertGraphProjectionService } from './db';
+import { dbClaimJob, dbEnsureEmbeddingConfig, dbReplaceChunksAndEmbeddings, dbUpsertDocumentVersion, queryService, dbCompleteJob, dbEnqueueFileTransition, dbEnqueueJob, dbEpistemicWatermarkService, dbFailJob, dbGetArchiveRecord, dbGetDatasetVersion, dbGetLatestDatasetVersion, dbGetWorkspaceSpec, dbListDueAnalyticsSchedules, dbMarkAnalyticsScheduleRan, dbHasOpenFileJob, dbListAgedActiveFiles, dbListRetentionWorkspaces, dbReadEpistemicGraphService, dbRecordActivity, dbRecordOpsEvent, dbRegisterAnalyticsResult, dbUpsertGraphProjectionService } from './db';
+import { writeAnalyticsSink } from './analytics-sink';
+import { loadEmbeddingConfigFromEnv } from '../rag/embeddings';
+import { loadReaderConfigFromEnv } from '../rag/reader';
 import { loadArchiveRecord } from './present';
 import { archiveDeps, graphClient, objectStore } from './runtime';
 import { randomUUID } from 'crypto';
@@ -57,11 +60,30 @@ export async function drainQueueOnce(targetWorkspaceId?: string, maxJobs = 10): 
         ? {
             loadVersion: (workspaceId, datasetVersionId) =>
               dbGetDatasetVersion(workspaceId, datasetVersionId),
+            loadWorkspaceSpec: (workspaceId, slug, version) =>
+              dbGetWorkspaceSpec(workspaceId, slug, version),
+            writeSink: writeAnalyticsSink,
             registerResult: async (input) => {
               await dbRegisterAnalyticsResult(input);
             },
           }
         : undefined,
+      // A `rag_ingest_file` job indexes one uploaded file. Same trusted pool and
+      // workspace pinning as the jobs above.
+      ragIngest: {
+        embedding: loadEmbeddingConfigFromEnv(),
+        reader: loadReaderConfigFromEnv(),
+        loadFile: async (workspaceId, fileId) => {
+          const file = await dbGetArchiveRecord(workspaceId, fileId);
+          return file ? { name: file.name, mimeType: file.mimeType, storageKey: file.storageKey } : null;
+        },
+        ensureConfig: (workspaceId, c) =>
+          dbEnsureEmbeddingConfig(workspaceId, c.model, c.modelVersion, c.dimensions, c.chunker, c.chunkSize, c.chunkOverlap, queryService),
+        upsertVersion: (v) =>
+          dbUpsertDocumentVersion(v.workspaceId, v.title, v.contentHash, v.mimeType, v.byteSize, v.extractedText, null, v.fileId, queryService),
+        replaceChunks: (workspaceId, versionId, configId, chunks, vectors) =>
+          dbReplaceChunksAndEmbeddings(workspaceId, versionId, configId, chunks, vectors, queryService),
+      },
       // Resolve the thumbnail target through the trusted service pool: the app
       // pool is RLS-fenced and the scheduler drain runs with no caller identity.
       // Pinning to the job's workspace is what stops a payload from pointing the
@@ -150,14 +172,51 @@ export async function runRetentionSweep(): Promise<number> {
 }
 
 /**
- * Starts the two background loops a single container needs: a minute tick that
- * drains the job queue (so queued archiving/restores progress without a human
+ * Enqueues one analytics_query job for every due schedule whose dataset has a
+ * version it has not yet run on. The idempotency key names the schedule and the
+ * version, so a repeated tick (or two containers) cannot enqueue the same run twice.
+ */
+export async function runAnalyticsSchedules(): Promise<number> {
+  let enqueued = 0;
+  for (const schedule of await dbListDueAnalyticsSchedules()) {
+    const latest = await dbGetLatestDatasetVersion(schedule.workspaceId, schedule.dataset);
+    if (!latest || latest.id === schedule.lastDatasetVersionId) {
+      await dbMarkAnalyticsScheduleRan(schedule.id, schedule.everyMinutes, null);
+      continue;
+    }
+    await dbEnqueueJob(
+      randomUUID(),
+      schedule.workspaceId,
+      'analytics_query',
+      `sched:${schedule.id}:${latest.id}`,
+      {
+        datasetVersionId: latest.id,
+        querySpec: schedule.spec,
+        params: schedule.params,
+        sink: schedule.sink,
+        resultId: randomUUID(),
+      },
+      schedule.createdBy
+    );
+    await dbMarkAnalyticsScheduleRan(schedule.id, schedule.everyMinutes, latest.id);
+    enqueued += 1;
+  }
+  return enqueued;
+}
+
+/**
+ * Starts the background loops a single container needs: a minute tick that
+ * enqueues due analytics schedules, one that drains the job queue (so queued archiving/restores progress without a human
  * pressing "Run worker pass"), and an hourly retention sweep. Both are unref'd so
  * they never hold the process open.
  */
 export function startSchedulers(): void {
   setInterval(() => {
     drainQueueOnce(undefined, 25).catch((err) => console.warn('Queue drain tick failed:', err));
+  }, 60_000).unref();
+
+  setInterval(() => {
+    runAnalyticsSchedules().catch((err) => console.warn('Analytics schedule tick failed:', err));
   }, 60_000).unref();
 
   setInterval(() => {

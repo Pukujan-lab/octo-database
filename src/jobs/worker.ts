@@ -16,6 +16,7 @@ import { ensureThumbnail } from '../media/thumbnail-service';
 import { ArchiveDeps, ArchiveFileRecord, archiveFile, restoreFile } from '../storage/archive-service';
 import { ClaimedJob, completeJob, failJob, recordActivity } from './job-service';
 import { AnalyticsJobDeps, runAnalyticsJob } from '../analytics/job';
+import { RagIngestDeps, runRagIngestJob } from '../rag/ingest';
 import type { GraphClient } from '../graph/falkordb-client';
 import { GRAPH_SCHEMA_VERSION, ProjectionInput, projectWorkspaceGraph } from '../graph/projector';
 import type { GraphProjectionRecord } from '../types/graph';
@@ -61,6 +62,8 @@ export interface WorkerDeps {
    * absent wiring means the surface is not configured on this worker.
    */
   analytics?: Omit<AnalyticsJobDeps, 'store'>;
+  /** Document indexing wiring for `rag_ingest_file` jobs. The store comes from `store`. */
+  ragIngest?: Omit<RagIngestDeps, 'store'>;
   /** Loads the file record an archive/restore job targets. */
   loadArchiveTarget?: (workspaceId: string, fileId: string) => Promise<ArchiveFileRecord | null>;
   /**
@@ -282,6 +285,10 @@ export async function processJob(job: ClaimedJob, deps: WorkerDeps): Promise<Job
       outcome = await handleGraphProjectionJob(job, deps);
     } else if (job.jobType === 'analytics_query') {
       outcome = await handleAnalyticsQueryJob(job, deps);
+    } else if (job.jobType === 'rag_ingest_file') {
+      outcome = deps.ragIngest
+        ? await runRagIngestJob(job, { store: deps.store, ...deps.ragIngest })
+        : { ok: false, code: 'RAG_NOT_CONFIGURED', summary: 'document indexing is not configured on this worker', retryable: false };
     } else {
       outcome = { ok: false, code: 'UNKNOWN_JOB_TYPE', summary: `No handler for job type ${job.jobType}`, retryable: false };
     }

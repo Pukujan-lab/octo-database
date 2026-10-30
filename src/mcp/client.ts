@@ -50,6 +50,10 @@ export class OctoApi {
     return text ? JSON.parse(text) : null;
   }
 
+  capabilities(): Promise<unknown> {
+    return this.request('GET', '/api/capabilities');
+  }
+
   me(): Promise<unknown> {
     return this.request('GET', '/api/me');
   }
@@ -154,25 +158,33 @@ export class OctoApi {
     );
   }
 
-  query(input: { workspaceId: string; query: string; limit?: number }): Promise<unknown> {
+  query(input: {
+    workspaceId: string;
+    query: string;
+    limit?: number;
+    filter?: { documentIds?: string[]; titlePrefix?: string; latestVersionOnly?: boolean };
+  }): Promise<unknown> {
     return this.request('POST', '/api/rag/query', {
       workspaceId: input.workspaceId,
       query: input.query,
       ...(input.limit === undefined ? {} : { limit: input.limit }),
+      ...(input.filter === undefined ? {} : { filter: input.filter }),
     });
   }
 
   ingestDocument(input: {
     workspaceId: string;
-    title: string;
-    text: string;
+    title?: string;
+    text?: string;
     mimeType?: string;
+    fileId?: string;
   }): Promise<unknown> {
     return this.request('POST', '/api/rag/documents', {
       workspaceId: input.workspaceId,
-      title: input.title,
-      text: input.text,
+      ...(input.title === undefined ? {} : { title: input.title }),
+      ...(input.text === undefined ? {} : { text: input.text }),
       ...(input.mimeType === undefined ? {} : { mimeType: input.mimeType }),
+      ...(input.fileId === undefined ? {} : { fileId: input.fileId }),
     });
   }
 
@@ -271,6 +283,7 @@ export class OctoApi {
     provenance: Record<string, unknown>;
     watermark?: string;
     idempotencyKey?: string;
+    append?: boolean;
     parts: Array<{ partition: string; dataBase64: string }>;
   }): Promise<unknown> {
     return this.request(
@@ -284,6 +297,7 @@ export class OctoApi {
         provenance: input.provenance,
         ...(input.watermark === undefined ? {} : { watermark: input.watermark }),
         ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+        ...(input.append === undefined ? {} : { append: input.append }),
         parts: input.parts,
       }
     );
@@ -291,19 +305,54 @@ export class OctoApi {
 
   submitAnalyticsQuery(input: {
     workspaceId: string;
-    datasetVersionId: string;
+    datasetVersionId?: string;
+    dataset?: string;
     querySpec: string;
+    params?: Record<string, unknown>;
     idempotencyKey?: string;
   }): Promise<unknown> {
     return this.request(
       'POST',
       `/api/workspaces/${encodeURIComponent(input.workspaceId)}/analytics/queries`,
       {
-        datasetVersionId: input.datasetVersionId,
+        ...(input.datasetVersionId === undefined ? {} : { datasetVersionId: input.datasetVersionId }),
+        ...(input.dataset === undefined ? {} : { dataset: input.dataset }),
         querySpec: input.querySpec,
+        ...(input.params === undefined ? {} : { params: input.params }),
         ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
       }
     );
+  }
+
+  registerAnalyticsSpec(input: {
+    workspaceId: string;
+    slug: string;
+    dataset: string;
+    sql: string;
+    params?: Array<{ name: string; type: string }>;
+  }): Promise<unknown> {
+    const { workspaceId, ...body } = input;
+    return this.request('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/analytics/specs`, body);
+  }
+
+  listAnalyticsSpecs(input: { workspaceId: string }): Promise<unknown> {
+    return this.request('GET', `/api/workspaces/${encodeURIComponent(input.workspaceId)}/analytics/specs`);
+  }
+
+  createAnalyticsSchedule(input: {
+    workspaceId: string;
+    spec: string;
+    dataset: string;
+    params?: Record<string, unknown>;
+    everyMinutes: number;
+    sink: { table: string; mode: 'replace' | 'upsert'; keys?: string[] };
+  }): Promise<unknown> {
+    const { workspaceId, ...body } = input;
+    return this.request('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/analytics/schedules`, body);
+  }
+
+  listAnalyticsSchedules(input: { workspaceId: string }): Promise<unknown> {
+    return this.request('GET', `/api/workspaces/${encodeURIComponent(input.workspaceId)}/analytics/schedules`);
   }
 
   getAnalyticsQueryStatus(input: { workspaceId: string; jobId: string }): Promise<unknown> {
