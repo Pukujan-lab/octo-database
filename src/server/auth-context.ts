@@ -25,6 +25,17 @@ export interface AuthContext {
     scopes: string[];
     isAccountWide: boolean;
   };
+  /** Set for an owner-listed agent key; the request is treated as the owner's session. */
+  ownerAgent?: boolean;
+}
+
+function ownerAgentKeyIds(): Set<string> {
+  return new Set(
+    (process.env['OCTO_OWNER_AGENT_KEYS'] ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean)
+  );
 }
 
 export function keyWorkspaceMatches(auth: AuthContext, workspaceId: string): boolean {
@@ -90,6 +101,12 @@ export async function authenticateRequest(req: IncomingMessage): Promise<AuthCon
     };
 
     bindRequestIdentity(pRow.id, verified.workspaceId ?? null);
+
+    // An account-wide key the owner lists in OCTO_OWNER_AGENT_KEYS acts as its
+    // owner's signed-in session, so the owner's agents reach every feature.
+    if (verified.workspaceId === null && ownerAgentKeyIds().has(verified.keyId)) {
+      return { principal, ownerAgent: true };
+    }
 
     return {
       principal,
