@@ -14,21 +14,25 @@
  *   OCTO_SERVICE_URL (or DATABASE_URL)   service connection
  *   OCTO_EMBEDDING_BASE_URL / _MODEL / _DIMENSIONS
  *
+ * Also the re-index after a chunker change (issue #357 renamed the chunker to
+ * paragraph-aware-v2): every text version is re-chunked under the current config.
+ *
  * Exit 0 = rebuilt, 2 = misconfigured. Idempotent: each version's derived rows are
  * deleted and rewritten inside one transaction, so a crash cannot leave a
  * half-indexed version and a re-run is safe.
  */
 
 import { embedTexts, loadEmbeddingConfigFromEnv } from '../src/rag/embeddings';
+import { RAG_CHUNKER, RAG_CHUNK_OVERLAP, RAG_CHUNK_SIZE, RAG_MODEL_VERSION } from '../src/rag/ingest';
 import { chunkKey, chunkText, type ChunkConfig } from '../src/rag/pipeline';
 import { queryService, servicePool, withTransaction } from '../src/server/db';
 
-// The config identity must match what src/routes/rag.ts computes at ingest time,
-// or a later ingest would write a second embedding_configs row for the same model.
-const MODEL_VERSION = 'v1';
-const CHUNKER = 'paragraph-aware';
-const CHUNK_SIZE = 800;
-const CHUNK_OVERLAP = 100;
+// The config identity is the one every ingest path writes (src/rag/ingest.ts), or a
+// later ingest would write a second embedding_configs row for the same model.
+const MODEL_VERSION = RAG_MODEL_VERSION;
+const CHUNKER = RAG_CHUNKER;
+const CHUNK_SIZE = RAG_CHUNK_SIZE;
+const CHUNK_OVERLAP = RAG_CHUNK_OVERLAP;
 const EMBED_BATCH = 32;
 
 interface VersionRow {
@@ -75,6 +79,9 @@ async function main(): Promise<void> {
     `SELECT id, workspace_id, extracted_text
        FROM octo.document_versions
       WHERE extraction_status = 'extracted' AND extracted_text IS NOT NULL
+        -- A PDF is re-indexed by queueing its rag_ingest_file job again: its chunks
+        -- are per-page passages, which re-chunking the flat text would lose.
+        AND split_part(mime_type, ';', 1) <> 'application/pdf'
       ORDER BY workspace_id, version_number`
   );
 

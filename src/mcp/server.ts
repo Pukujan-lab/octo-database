@@ -286,15 +286,23 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
 
   server.tool(
     'query_workspace',
-    'Answer a natural-language question from a workspace\'s indexed documents.',
+    'Answer a natural-language question from a workspace\'s indexed documents. Each match carries documentId, title, versionNumber and page (PDFs). The optional filter narrows the search before its limit.',
     {
       workspaceId: z.string().describe('The workspace to query'),
       query: z.string().describe('The question to answer'),
       limit: z.number().int().positive().optional().describe('Maximum number of passages to retrieve'),
+      filter: z
+        .object({
+          documentIds: z.array(z.string()).optional().describe('Only these documents'),
+          titlePrefix: z.string().optional().describe('Only documents whose title starts with this'),
+          latestVersionOnly: z.boolean().optional().describe('Only each document\'s newest version'),
+        })
+        .optional()
+        .describe('Restrict which documents are searched'),
     },
-    async ({ workspaceId, query, limit }) => {
+    async ({ workspaceId, query, limit, filter }) => {
       try {
-        return asText(await api.query({ workspaceId, query, limit }));
+        return asText(await api.query({ workspaceId, query, limit, filter }));
       } catch (error) {
         return asError(error);
       }
@@ -303,16 +311,17 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
 
   server.tool(
     'ingest_document',
-    'Index a text document into a workspace so query_workspace can retrieve it. Chunks and embeds the text server-side; re-ingesting identical content is a no-op. Uploads via upload_file are NOT indexed automatically — use this tool to make text searchable. Requires the write scope and an operator or higher role.',
+    'Index a document into a workspace so query_workspace can retrieve it. Give title and text to index text now, or fileId to index an uploaded file (PDF or text) in the background; that returns a job. PDF and text uploads are also indexed automatically when embeddings are configured. Requires the write scope and an operator or higher role.',
     {
       workspaceId: z.string().describe('The workspace to ingest into'),
-      title: z.string().describe('Document title (unique per workspace)'),
-      text: z.string().describe('The document text to index'),
+      title: z.string().optional().describe('Document title (unique per workspace; defaults to the file name for fileId)'),
+      text: z.string().optional().describe('The document text to index'),
       mimeType: z.string().optional().describe('MIME type (defaults to text/plain)'),
+      fileId: z.string().optional().describe('An uploaded file to index instead of text'),
     },
-    async ({ workspaceId, title, text, mimeType }) => {
+    async ({ workspaceId, title, text, mimeType, fileId }) => {
       try {
-        return asText(await api.ingestDocument({ workspaceId, title, text, mimeType }));
+        return asText(await api.ingestDocument({ workspaceId, title, text, mimeType, fileId }));
       } catch (error) {
         return asError(error);
       }

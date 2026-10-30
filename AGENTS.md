@@ -84,6 +84,10 @@ Pinned versions currently used by repository validation:
 - Required aggregate status is `gates`, covering contract integrity/integration checks,
   type checking, lint, and Ruff. Never claim completion when the requested workflow has
   not actually run.
+- **Close what you finish.** A PR that completes an issue says `Closes #<n>` in its body,
+  one line per issue; `close-on-merge-caller.yml` then closes it on merge. A PR that only
+  advances an issue says `Refs #<n>`. Before filing a new issue log, search open issues and
+  comment on a match instead of filing a duplicate.
 
 ## Dev root hygiene
 

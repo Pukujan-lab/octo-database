@@ -158,25 +158,33 @@ export class OctoApi {
     );
   }
 
-  query(input: { workspaceId: string; query: string; limit?: number }): Promise<unknown> {
+  query(input: {
+    workspaceId: string;
+    query: string;
+    limit?: number;
+    filter?: { documentIds?: string[]; titlePrefix?: string; latestVersionOnly?: boolean };
+  }): Promise<unknown> {
     return this.request('POST', '/api/rag/query', {
       workspaceId: input.workspaceId,
       query: input.query,
       ...(input.limit === undefined ? {} : { limit: input.limit }),
+      ...(input.filter === undefined ? {} : { filter: input.filter }),
     });
   }
 
   ingestDocument(input: {
     workspaceId: string;
-    title: string;
-    text: string;
+    title?: string;
+    text?: string;
     mimeType?: string;
+    fileId?: string;
   }): Promise<unknown> {
     return this.request('POST', '/api/rag/documents', {
       workspaceId: input.workspaceId,
-      title: input.title,
-      text: input.text,
+      ...(input.title === undefined ? {} : { title: input.title }),
+      ...(input.text === undefined ? {} : { text: input.text }),
       ...(input.mimeType === undefined ? {} : { mimeType: input.mimeType }),
+      ...(input.fileId === undefined ? {} : { fileId: input.fileId }),
     });
   }
 
