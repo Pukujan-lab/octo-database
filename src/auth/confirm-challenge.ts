@@ -2,10 +2,28 @@ import { randomBytes } from 'crypto';
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const TTL_MS = 10 * 60 * 1000;
+/** After a full confirmation, further gated actions pass without codes for this long. */
+export const CONFIRM_WINDOW_MS = 2 * 60 * 1000;
 
 type PendingChallenge = { code: string; expiresAt: number };
 
 const pending = new Map<string, PendingChallenge>();
+const windows = new Map<string, number>();
+
+/** Starts (or restarts) the no-codes window after a person passed the full gate. */
+export function openConfirmWindow(principalId: string, now = Date.now()): number {
+  const until = now + CONFIRM_WINDOW_MS;
+  windows.set(principalId, until);
+  return until;
+}
+
+export function inConfirmWindow(principalId: string, now = Date.now()): boolean {
+  const until = windows.get(principalId);
+  if (until === undefined) return false;
+  if (until > now) return true;
+  windows.delete(principalId);
+  return false;
+}
 
 /** A fresh code the human types back. Replaces any unused code for that person. */
 export function issueConfirmChallenge(
