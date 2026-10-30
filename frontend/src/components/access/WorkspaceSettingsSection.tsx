@@ -6,6 +6,7 @@ import { Panel, StatusPill } from "@/components/portal/Panel";
 import { ConfirmGate } from "@/components/portal/ConfirmGate";
 import { ConfirmSecretDialog } from "@/components/portal/ConfirmSecretDialog";
 import { api, errorMessage, isConfirmSecretMissing } from "@/lib/api";
+import { useConfirmWindow } from "@/lib/confirm-window";
 import type { DeleteWorkspaceResult, MeResponse, Workspace } from "@/lib/types";
 import { formatCount } from "@/lib/format";
 import { AlertOctagon, Trash2 } from "lucide-react";
@@ -37,6 +38,7 @@ export function WorkspaceSettingsSection({
   const [mfaCode, setMfaCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [rotateOpen, setRotateOpen] = useState(false);
+  const windowLeft = useConfirmWindow();
 
   async function destroy() {
     if (slugInput.trim() !== workspace.slug) {
@@ -168,7 +170,7 @@ export function WorkspaceSettingsSection({
                 <Button
                   size="sm"
                   onClick={() => void destroy()}
-                  disabled={busy || slugInput.trim() !== workspace.slug || !typed}
+                  disabled={busy || slugInput.trim() !== workspace.slug || (!typed && windowLeft === 0)}
                   className="gap-2 bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 >
                   <Trash2 className="h-4 w-4" /> {busy ? "Deleting…" : `Delete ${workspace.name}`}

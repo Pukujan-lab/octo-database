@@ -23,11 +23,13 @@ export async function setConfirmSecret(
   expect(response.status()).toBe(200);
 }
 
-/** Types the one-time code the form is showing. */
+/** Types the one-time code the form is showing; a no-op inside the two-minute window. */
 export async function typeConfirmCode(page: Page, scope?: Locator): Promise<void> {
   const root = scope ?? page.locator('body');
   const shown = root.locator('[data-testid="confirm-code-value"]');
+  const confirmed = root.locator('[data-testid="confirm-window"]');
 
+  if (await confirmed.isVisible()) return;
   if (await shown.isVisible()) {
     await root.locator('[data-testid="confirm-code"]').fill(((await shown.innerText()) ?? '').trim());
     return;
@@ -38,8 +40,10 @@ export async function typeConfirmCode(page: Page, scope?: Locator): Promise<void
   const trigger = page.getByRole('button', { name: /^Confirmation/ }).first();
   await trigger.waitFor({ state: 'visible' });
   await trigger.click();
-  await shown.waitFor({ state: 'visible' });
-  await root.locator('[data-testid="confirm-code"]').fill(((await shown.innerText()) ?? '').trim());
+  await shown.or(confirmed).first().waitFor({ state: 'visible' });
+  if (!(await confirmed.isVisible())) {
+    await root.locator('[data-testid="confirm-code"]').fill(((await shown.innerText()) ?? '').trim());
+  }
   // Close the dialog so the action the test drives next is clickable; scope it
   // to the dialog because cabinet disclosures may also read "Close".
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).first().click();

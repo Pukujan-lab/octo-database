@@ -29,6 +29,39 @@ test('a human types a fresh code to mint a workspace key, with no saved password
   expect(minted.status()).toBe(201);
 });
 
+test('after one confirmed change, the next one needs no code for two minutes', async ({ request }) => {
+  const guest = await request.post('/api/auth/guest', { data: { displayName: 'Window guest' } });
+  expect(guest.status()).toBe(201);
+  const session = (await guest.json()) as { sessionToken: string; workspace: { id: string } };
+  const headers = { Authorization: `Bearer ${session.sessionToken}` };
+
+  const before = await request.post('/api/keys', {
+    headers,
+    data: { name: `Before ${randomUUID()}`, workspaceId: session.workspace.id },
+  });
+  expect(before.status()).toBe(403);
+
+  const issued = await request.post('/api/me/confirm-challenge', { headers });
+  const { code } = (await issued.json()) as { code: string };
+  const first = await request.post('/api/keys', {
+    headers,
+    data: { name: `First ${randomUUID()}`, workspaceId: session.workspace.id, confirmSecret: code },
+  });
+  expect(first.status()).toBe(201);
+
+  const second = await request.post('/api/keys', {
+    headers,
+    data: { name: `Second ${randomUUID()}`, workspaceId: session.workspace.id },
+  });
+  expect(second.status()).toBe(201);
+
+  const wrong = await request.post('/api/keys', {
+    headers,
+    data: { name: `Wrong ${randomUUID()}`, workspaceId: session.workspace.id, confirmSecret: 'AAAAAA' },
+  });
+  expect(wrong.status()).toBe(403);
+});
+
 test('a human with no saved secret recovers when the shown code is gone', async ({ request }) => {
   const guest = await request.post('/api/auth/guest', { data: { displayName: 'Lost code guest' } });
   expect(guest.status()).toBe(201);

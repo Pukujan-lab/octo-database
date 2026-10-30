@@ -3,6 +3,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, ShieldCheck, KeyRound } from "lucide-react";
+import { useConfirmWindow } from "@/lib/confirm-window";
 
 type Props = {
   code: string | null;
@@ -60,6 +61,19 @@ export function ConfirmGate({
   }, [expiresAt]);
 
   const expiry = expiryLabel(expiresAt, now);
+  const windowLeft = useConfirmWindow();
+
+  if (windowLeft > 0) {
+    return (
+      <div data-testid="confirm-window" className="flex items-center gap-2 rounded-md border border-border bg-muted/45 p-3">
+        <ShieldCheck className="h-4 w-4 text-primary" />
+        <span className="text-xs text-muted-foreground">
+          Confirmed — no codes needed for the next {Math.floor(windowLeft / 60)}:
+          {String(windowLeft % 60).padStart(2, "0")}.
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3 rounded-md border border-border bg-muted/45 p-4">
@@ -69,8 +83,8 @@ export function ConfirmGate({
         {expiry ? <span className="ml-auto text-[11px] text-muted-foreground">{expiry}</span> : null}
       </div>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Type the code below exactly as issued. It is single-use: every action below needs a fresh
-        code, and one appears here after each save.
+        Type the code below exactly as issued. Once it goes through, further changes need no codes
+        for two minutes.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">

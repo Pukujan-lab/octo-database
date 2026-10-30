@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { formatClock } from "@/lib/format";
 import type { Principal, Workspace } from "@/lib/types";
 import {
+  Blocks,
   ChartColumn,
   ChevronDown,
   Clock,
@@ -25,6 +26,7 @@ export type ViewId =
   | "gallery"
   | "operations"
   | "analytics"
+  | "services"
   | "access"
   | "vault";
 
@@ -34,6 +36,7 @@ export const VIEWS: Array<{ id: ViewId; label: string; icon: typeof LayoutDashbo
   { id: "gallery", label: "Gallery", icon: Images },
   { id: "operations", label: "Operations", icon: Workflow },
   { id: "analytics", label: "Analytics", icon: ChartColumn },
+  { id: "services", label: "Services", icon: Blocks },
   { id: "access", label: "Access", icon: Shield },
   { id: "vault", label: "Keys", icon: KeyRound },
 ];

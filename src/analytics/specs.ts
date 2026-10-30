@@ -6,7 +6,7 @@
  * version, so a request can neither widen the read nor inject SQL.
  */
 
-import type { ColumnSpec } from '../types/analytics';
+import type { ColumnSpec, SpecParam, SpecParamType } from '../types/analytics';
 
 export interface QuerySpec {
   id: string;
@@ -114,4 +114,90 @@ export const QUERY_SPECS: Record<string, QuerySpec> = {
 
 export function getQuerySpec(id: string): QuerySpec | null {
   return Object.prototype.hasOwnProperty.call(QUERY_SPECS, id) ? QUERY_SPECS[id]! : null;
+}
+
+/** The id a workspace spec is submitted under: `ws:<slug>@<version>`. */
+const WORKSPACE_SPEC_ID = /^ws:([a-z0-9][a-z0-9-]{0,62})@([1-9]\d{0,8})$/;
+
+export function parseWorkspaceSpecId(id: string): { slug: string; version: number } | null {
+  const match = WORKSPACE_SPEC_ID.exec(id);
+  return match ? { slug: match[1]!, version: Number(match[2]) } : null;
+}
+
+export function workspaceSpecId(slug: string, version: number): string {
+  return `ws:${slug}@${version}`;
+}
+
+const PARAM_NAME = /^[a-z][a-z0-9_]{0,40}$/;
+const PARAM_TYPES: SpecParamType[] = ['text', 'integer', 'double', 'boolean', 'date', 'timestamp'];
+const DATE_TEXT = /^\d{4}-\d{2}-\d{2}$/;
+const TIMESTAMP_TEXT = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/;
+
+/** Structural validation of declared spec parameters. Returns an error or null. */
+export function validateParamDecls(raw: unknown): string | null {
+  if (!Array.isArray(raw)) return 'params must be an array of { name, type }';
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    const name = (entry as { name?: unknown } | null)?.name;
+    const type = (entry as { type?: unknown } | null)?.type;
+    if (typeof name !== 'string' || !PARAM_NAME.test(name)) {
+      return 'param names must match [a-z][a-z0-9_]*';
+    }
+    if (typeof type !== 'string' || !PARAM_TYPES.includes(type as SpecParamType)) {
+      return `param ${name} type must be one of ${PARAM_TYPES.join(', ')}`;
+    }
+    if (seen.has(name)) return `duplicate param ${name}`;
+    seen.add(name);
+  }
+  return null;
+}
+
+/**
+ * Checks supplied values against the declared params and returns the values to
+ * bind, or an error. Every declared param is required and nothing else is accepted.
+ * Dates and timestamps are bound as text; the SQL casts them (`CAST($from AS DATE)`).
+ */
+export function coerceParams(
+  declared: SpecParam[],
+  supplied: unknown
+): { ok: true; values: Record<string, string | number | boolean> } | { ok: false; message: string } {
+  const given = supplied === undefined ? {} : supplied;
+  if (!given || typeof given !== 'object' || Array.isArray(given)) {
+    return { ok: false, message: 'params must be an object' };
+  }
+  const input = given as Record<string, unknown>;
+  const extra = Object.keys(input).filter((key) => !declared.some((p) => p.name === key));
+  if (extra.length > 0) return { ok: false, message: `unknown param ${extra[0]}` };
+
+  const values: Record<string, string | number | boolean> = {};
+  for (const param of declared) {
+    const value = input[param.name];
+    const bad = (): { ok: false; message: string } => ({
+      ok: false,
+      message: `param ${param.name} must be a ${param.type}`,
+    });
+    if (value === undefined) return { ok: false, message: `param ${param.name} is required` };
+    switch (param.type) {
+      case 'text':
+        if (typeof value !== 'string' || value.length > 1000) return bad();
+        break;
+      case 'integer':
+        if (typeof value !== 'number' || !Number.isSafeInteger(value)) return bad();
+        break;
+      case 'double':
+        if (typeof value !== 'number' || !Number.isFinite(value)) return bad();
+        break;
+      case 'boolean':
+        if (typeof value !== 'boolean') return bad();
+        break;
+      case 'date':
+        if (typeof value !== 'string' || !DATE_TEXT.test(value)) return bad();
+        break;
+      case 'timestamp':
+        if (typeof value !== 'string' || !TIMESTAMP_TEXT.test(value)) return bad();
+        break;
+    }
+    values[param.name] = value as string | number | boolean;
+  }
+  return { ok: true, values };
 }

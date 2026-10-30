@@ -144,7 +144,44 @@ export const OCTO_CAPABILITIES: CapabilityDescriptor[] = [
     path: '/api/workspaces/<id>/datasets',
     requiredScope: 'write',
     description:
-      'Register an immutable Parquet dataset version: supply base64 parts, a declared schema, and provenance; the server validates the Parquet footers, assigns the next version, derives the object keys, and writes the bytes. A re-export is a new version, never a mutation.',
+      'Register an immutable Parquet dataset version: supply base64 parts, a declared schema, and provenance; the server validates the Parquet footers, assigns the next version, derives the object keys, and writes the bytes. A re-export is a new version, never a mutation. Pass append: true to extend the newest version with new date partitions without re-uploading earlier ones.',
+  },
+  {
+    action: 'analytics.register_spec',
+    method: 'POST',
+    path: '/api/workspaces/<id>/analytics/specs',
+    requiredScope: 'write',
+    description:
+      'Register a workspace query spec: one SELECT over a dataset (exposed to the SQL as the view "data") with typed $params. The server validates it against the dataset schema and stores it as an immutable version, ws:<slug>@<n>. A spec can read only the dataset version it is run over.',
+  },
+  {
+    action: 'analytics.specs',
+    method: 'GET',
+    path: '/api/workspaces/<id>/analytics/specs',
+    requiredScope: 'read',
+    description: 'List the workspace\'s registered query specs with their SQL and parameters.',
+  },
+  {
+    action: 'analytics.schedule',
+    method: 'POST',
+    path: '/api/workspaces/<id>/analytics/schedules',
+    requiredScope: 'write',
+    description:
+      'Run a spec on a schedule: every N minutes (5 to 10080), over a dataset\'s newest version, writing the result rows into analytics.<table> in the workspace database (replace or upsert by key columns). A run is skipped until a new dataset version has landed.',
+  },
+  {
+    action: 'analytics.schedules',
+    method: 'GET',
+    path: '/api/workspaces/<id>/analytics/schedules',
+    requiredScope: 'read',
+    description: 'List the workspace\'s analytics schedules with their next run time and the dataset version each last ran on.',
+  },
+  {
+    action: 'analytics.unschedule',
+    method: 'DELETE',
+    path: '/api/workspaces/<id>/analytics/schedules/<scheduleId>',
+    requiredScope: 'write',
+    description: 'Delete an analytics schedule. Rows it already wrote stay in the workspace database.',
   },
   {
     action: 'analytics.query',
@@ -152,7 +189,7 @@ export const OCTO_CAPABILITIES: CapabilityDescriptor[] = [
     path: '/api/workspaces/<id>/analytics/queries',
     requiredScope: 'read',
     description:
-      'Submit one named analytical query over a registered dataset version. The caller names a query spec, never SQL; the server builds the statement and enqueues an analytics_query job. Poll the job with analytics.query_status.',
+      'Submit one named analytical query over a registered dataset version. The caller names a built-in spec or a registered workspace spec (ws:<slug>@<n>) plus its params, never raw SQL; the server enqueues an analytics_query job. Poll the job with analytics.query_status.',
   },
   {
     action: 'analytics.query_status',
