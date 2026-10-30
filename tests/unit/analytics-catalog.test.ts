@@ -50,24 +50,30 @@ async function body(overrides: Record<string, unknown> = {}): Promise<Record<str
   };
 }
 
-function recordingCatalog(outcome: 'created' | 'existing' | 'conflict' = 'created') {
+function recordingCatalog(
+  outcome: 'created' | 'existing' | 'conflict' = 'created',
+  base: DatasetVersionRecord | null = null
+) {
   const seen: RegisterVersionInput[] = [];
   return {
     seen,
     catalog: {
+      async latestVersion() {
+        return base;
+      },
       async createVersion(input: RegisterVersionInput) {
         seen.push(input);
-        const keys = input.buildObjectKeys(1);
+        const keys = input.buildObjectKeys(base ? base.version + 1 : 1);
         await input.writeObjects(keys);
         if (outcome === 'conflict') return { status: 'conflict' as const };
         const version: DatasetVersionRecord = {
           id: randomUUID(),
           datasetId: randomUUID(),
           dataset: input.slug,
-          version: 1,
+          version: base ? base.version + 1 : 1,
           format: input.format,
           schema: input.schema,
-          objectKeys: keys,
+          objectKeys: [...(input.append?.carryKeys ?? []), ...keys],
           rowCount: input.rowCount,
           provenance: input.provenance,
           watermark: input.watermark,
@@ -205,5 +211,67 @@ describe('dataset registration', () => {
       expect(key.startsWith(`workspaces/${WORKSPACE}/lake/`)).toBe(true);
       expect(key.includes(other)).toBe(false);
     }
+  });
+});
+
+describe('dataset registration: any schema and appends', () => {
+  const BASE_KEY = `workspaces/${WORKSPACE}/lake/job-history/v1/dt=2026-01-30/part-aaaa.parquet`;
+  const base: DatasetVersionRecord = {
+    id: randomUUID(),
+    datasetId: randomUUID(),
+    dataset: 'job-history',
+    version: 1,
+    format: 'parquet',
+    schema: DECLARED,
+    objectKeys: [BASE_KEY],
+    rowCount: 5,
+    provenance: { source: 'test', exportedAt: '2026-10-19T00:00:00Z' },
+    watermark: null,
+    createdAt: '2026-10-19T00:00:00.000Z',
+  };
+
+  it('extends the newest version with new partitions and carries the old keys', async () => {
+    const { seen, catalog } = recordingCatalog('created', base);
+    const outcome = await registerDatasetVersion(
+      { workspaceId: WORKSPACE, createdBy: randomUUID(), body: await body({ append: true }), store: STORE },
+      catalog
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) throw new Error(outcome.message);
+    expect(outcome.version.version).toBe(2);
+    expect(outcome.version.objectKeys[0]).toBe(BASE_KEY);
+    expect(outcome.version.objectKeys).toHaveLength(2);
+    expect(seen[0]!.append).toEqual({ baseVersion: 1, carryKeys: [BASE_KEY], baseRowCount: 5 });
+    expect(seen[0]!.rowCount).toBe(7);
+  });
+
+  it('refuses an append of a partition the dataset already has', async () => {
+    const { catalog } = recordingCatalog('created', {
+      ...base,
+      objectKeys: [`workspaces/${WORKSPACE}/lake/job-history/v1/dt=2026-01-31/part-aaaa.parquet`],
+    });
+    const outcome = await registerDatasetVersion(
+      { workspaceId: WORKSPACE, createdBy: randomUUID(), body: await body({ append: true }), store: STORE },
+      catalog
+    );
+    expect(outcome).toMatchObject({ ok: false, http: 409, error: 'PARTITION_EXISTS' });
+  });
+
+  it('refuses an append with a different schema, and an append to nothing', async () => {
+    const changed = recordingCatalog('created', { ...base, schema: [{ name: 'x', type: 'TEXT' }] });
+    expect(
+      await registerDatasetVersion(
+        { workspaceId: WORKSPACE, createdBy: randomUUID(), body: await body({ append: true }), store: STORE },
+        changed.catalog
+      )
+    ).toMatchObject({ ok: false, error: 'SCHEMA_MISMATCH' });
+
+    const none = recordingCatalog('created', null);
+    expect(
+      await registerDatasetVersion(
+        { workspaceId: WORKSPACE, createdBy: randomUUID(), body: await body({ append: true }), store: STORE },
+        none.catalog
+      )
+    ).toMatchObject({ ok: false, http: 404, error: 'DATASET_NOT_FOUND' });
   });
 });
