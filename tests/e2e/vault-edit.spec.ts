@@ -95,13 +95,14 @@ test.describe('vault item edit', () => {
     expect(body.item.healthStatus).toBe('unchecked');
   });
 
-  test('an edit without a confirmation code is refused and changes nothing', async ({ request }) => {
+  test('an edit with a wrong confirmation code is refused and changes nothing', async ({ request }) => {
     const session = await createGuest(request);
     const item = await createItem(request, session.sessionToken);
 
+    // A missing code would pass here: creating the item opened the two-minute window.
     const response = await request.patch(`/api/vault/items/${item.id}`, {
       headers: bearer(session.sessionToken),
-      data: { label: 'hijacked', description: 'after', kind: 'token', notes: 'kept note' },
+      data: { label: 'hijacked', description: 'after', kind: 'token', notes: 'kept note', confirmSecret: 'not-the-code' },
     });
     expect(response.status()).toBe(403);
 

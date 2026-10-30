@@ -19,7 +19,7 @@
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { OctoApi } from '../src/mcp/client';
-import { createOctoMcpServer } from '../src/mcp/server';
+import { createOctoMcpServer, restrictToCapabilities } from '../src/mcp/server';
 
 const token = process.env['OCTO_MCP_TOKEN'];
 if (!token) {
@@ -29,5 +29,7 @@ if (!token) {
 
 const baseUrl = process.env['OCTO_MCP_BASE_URL'] ?? 'http://localhost:3001';
 
-const server = createOctoMcpServer(new OctoApi({ baseUrl, token }));
+const api = new OctoApi({ baseUrl, token });
+const server = createOctoMcpServer(api);
+await restrictToCapabilities(server, api);
 await server.connect(new StdioServerTransport());
