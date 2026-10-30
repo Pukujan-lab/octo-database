@@ -65,7 +65,7 @@ Before running on gravebuster, ensure:
 1. **Clone repository onto gravebuster**:
    ```bash
    mkdir -p ~/apps
-   git clone https://github.com/Pukujan/octo-database.git ~/apps/octo
+   git clone https://github.com/Pukujan-lab/octo-database.git ~/apps/octo
    cd ~/apps/octo
    git checkout production
    ```

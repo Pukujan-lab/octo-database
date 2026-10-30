@@ -1,11 +1,11 @@
 # OCTO-0401 Fork-safe multimodal vision audit
 
-<!-- continuity:task {"acceptance":["vision audit is skipped with an explicit logged reason when INFERHUB_API_KEY is absent","same-repo runs, including every push to main, still perform the real audit and assert a score","fork pull requests are no longer blocked by an unsatisfiable secret dependency","no pull_request_target workflow is introduced, so untrusted PR code is never checked out with secrets"],"depends_on":["OCTO-0080"],"goal":"Make the Playwright multimodal vision audit fork-safe so fork pull requests are not blocked by a repository secret they can never receive","id":"OCTO-0401","issue_url":"https://github.com/Pukujan/octo-database/issues/3","next_action":"Merged in PR #28 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Keep the vision quality gate honest for same-repo runs without making it an unsatisfiable required check for external contributors."} -->
+<!-- continuity:task {"acceptance":["vision audit is skipped with an explicit logged reason when INFERHUB_API_KEY is absent","same-repo runs, including every push to main, still perform the real audit and assert a score","fork pull requests are no longer blocked by an unsatisfiable secret dependency","no pull_request_target workflow is introduced, so untrusted PR code is never checked out with secrets"],"depends_on":["OCTO-0080"],"goal":"Make the Playwright multimodal vision audit fork-safe so fork pull requests are not blocked by a repository secret they can never receive","id":"OCTO-0401","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/3","next_action":"Merged in PR #28 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Keep the vision quality gate honest for same-repo runs without making it an unsatisfiable required check for external contributors."} -->
 
 - Status: completed
 - Priority: P1
 - Branch: `task/OCTO-0401-fork-safe-vision`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/3
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/3
 
 ## Goal
 

@@ -1,11 +1,11 @@
 # OCTO-0400 Scoped gallery/folder share links
 
-<!-- continuity:task {"acceptance":["owner creates a read-only album share returning a high-entropy token once","logged-out recipient views only the shared album and nothing else","sibling resources, workspace routes, and admin surfaces are unreachable with the token","only the token hash is stored; the raw token never appears in storage, logs, or audit output","revocation causes subsequent authorization to fail immediately","expiry boundary is enforced at the configured instant","upload permission is off by default and must be requested explicitly"],"depends_on":["OCTO-0300"],"goal":"Deliver scoped read-only share links with revocation and expiry for one gallery resource","id":"OCTO-0400","issue_url":"https://github.com/Pukujan/octo-database/issues/6","next_action":"Merged in PR #29 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Let an owner share exactly one album without granting access to the workspace or admin console."} -->
+<!-- continuity:task {"acceptance":["owner creates a read-only album share returning a high-entropy token once","logged-out recipient views only the shared album and nothing else","sibling resources, workspace routes, and admin surfaces are unreachable with the token","only the token hash is stored; the raw token never appears in storage, logs, or audit output","revocation causes subsequent authorization to fail immediately","expiry boundary is enforced at the configured instant","upload permission is off by default and must be requested explicitly"],"depends_on":["OCTO-0300"],"goal":"Deliver scoped read-only share links with revocation and expiry for one gallery resource","id":"OCTO-0400","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/6","next_action":"Merged in PR #29 with green gates.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Let an owner share exactly one album without granting access to the workspace or admin console."} -->
 
 - Status: completed
 - Priority: P1
 - Branch: `task/OCTO-0400-scoped-share-links`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/6
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/6
 
 ## Goal
 

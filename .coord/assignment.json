@@ -31,7 +31,7 @@
     "check_in": {
       "mechanism": "issue_comment",
       "interval_hint_minutes": 15,
-      "issue_url": "https://github.com/Pukujan/octo-database/issues/2",
+      "issue_url": "https://github.com/Pukujan-lab/octo-database/issues/2",
       "claim_file_path": ".coord/boss_claim.json"
     },
     "claim_queue": [],
@@ -147,9 +147,9 @@
     }
   },
   "ticket_links": {
-    "parent_issue": "https://github.com/Pukujan/octo-database/issues/1",
+    "parent_issue": "https://github.com/Pukujan-lab/octo-database/issues/1",
     "child_issues": [
-      "https://github.com/Pukujan/octo-database/issues/2"
+      "https://github.com/Pukujan-lab/octo-database/issues/2"
     ],
     "notes": "Parent and child notes only; no DAG engine."
   }

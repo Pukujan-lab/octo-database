@@ -3,7 +3,7 @@
   "oio_version": "0.2.0",
   "ontology_id": "oio:issue-log",
   "ontology_version": "1.1.0",
-  "project_id": "Pukujan/octo-database",
+  "project_id": "Pukujan-lab/octo-database",
   "namespace": "pukujan-octo-database",
   "managed_files": {
     ".oio/ontology/default.json": "1120f15a62c92698bb102e1d1566609191ae446c8d1950f124fb5b939d4f8d87",
