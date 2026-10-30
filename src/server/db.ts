@@ -1435,7 +1435,8 @@ export async function dbEnsureEmbeddingConfig(
   dimensions: number,
   chunker: string,
   chunkSize: number,
-  chunkOverlap: number
+  chunkOverlap: number,
+  run: typeof query = query
 ): Promise<string> {
   const sql = `
     INSERT INTO octo.embedding_configs
@@ -1445,12 +1446,12 @@ export async function dbEnsureEmbeddingConfig(
     DO NOTHING
     RETURNING id;
   `;
-  const inserted = await query<{ id: string }>(sql, [
+  const inserted = await run<{ id: string }>(sql, [
     workspaceId, model, modelVersion, dimensions, chunker, chunkSize, chunkOverlap,
   ]);
   if (inserted[0]) return inserted[0].id;
 
-  const existing = await query<{ id: string }>(
+  const existing = await run<{ id: string }>(
     `SELECT id FROM octo.embedding_configs
      WHERE workspace_id = $1 AND model = $2 AND model_version = $3
        AND chunker = $4 AND chunk_size = $5 AND chunk_overlap = $6`,
@@ -1462,6 +1463,9 @@ export async function dbEnsureEmbeddingConfig(
 /**
  * Registers an immutable document version. A repeat of the same content hash
  * returns the existing version instead of creating a duplicate.
+ *
+ * `fileId` links a version indexed from an uploaded file; `run` lets the queue
+ * worker, which has no caller identity, write through the service pool.
  */
 export async function dbUpsertDocumentVersion(
   workspaceId: string,
@@ -1470,7 +1474,9 @@ export async function dbUpsertDocumentVersion(
   mimeType: string,
   byteSize: number,
   extractedText: string,
-  createdBy: string
+  createdBy: string | null,
+  fileId: string | null = null,
+  run: typeof query = query
 ): Promise<{ versionId: string; documentId: string; created: boolean }> {
   const docSql = `
     INSERT INTO octo.documents (workspace_id, title, created_by)
@@ -1478,11 +1484,11 @@ export async function dbUpsertDocumentVersion(
     ON CONFLICT (workspace_id, title) DO NOTHING
     RETURNING id;
   `;
-  const docInserted = await query<{ id: string }>(docSql, [workspaceId, title, createdBy]);
+  const docInserted = await run<{ id: string }>(docSql, [workspaceId, title, createdBy]);
   let documentId = docInserted[0]?.id;
 
   if (!documentId) {
-    const found = await query<{ id: string }>(
+    const found = await run<{ id: string }>(
       'SELECT id FROM octo.documents WHERE workspace_id = $1 AND title = $2',
       [workspaceId, title]
     );
@@ -1492,24 +1498,24 @@ export async function dbUpsertDocumentVersion(
   const versionSql = `
     INSERT INTO octo.document_versions
       (document_id, workspace_id, version_number, content_hash, mime_type, byte_size,
-       extracted_text, extraction_status)
+       extracted_text, extraction_status, file_id)
     VALUES (
       $1, $2,
       COALESCE((SELECT MAX(version_number) + 1 FROM octo.document_versions WHERE document_id = $1), 1),
-      $3, $4, $5, $6, 'extracted'
+      $3, $4, $5, $6, 'extracted', $7
     )
     ON CONFLICT (document_id, content_hash) DO NOTHING
     RETURNING id;
   `;
-  const versionInserted = await query<{ id: string }>(versionSql, [
-    documentId, workspaceId, contentHash, mimeType, byteSize, extractedText,
+  const versionInserted = await run<{ id: string }>(versionSql, [
+    documentId, workspaceId, contentHash, mimeType, byteSize, extractedText, fileId,
   ]);
 
   if (versionInserted[0]) {
     return { versionId: versionInserted[0].id, documentId, created: true };
   }
 
-  const existing = await query<{ id: string }>(
+  const existing = await run<{ id: string }>(
     'SELECT id FROM octo.document_versions WHERE document_id = $1 AND content_hash = $2',
     [documentId, contentHash]
   );
@@ -1521,28 +1527,29 @@ export async function dbReplaceChunksAndEmbeddings(
   workspaceId: string,
   versionId: string,
   configId: string,
-  chunks: Array<{ chunkIndex: number; chunkKey: string; content: string; startOffset: number; endOffset: number; tokenEstimate: number }>,
-  vectors: number[][]
+  chunks: Array<{ chunkIndex: number; chunkKey: string; content: string; startOffset: number; endOffset: number; tokenEstimate: number; page?: number | null }>,
+  vectors: number[][],
+  run: typeof query = query
 ): Promise<number> {
   // Derived artifacts are rebuilt as a unit so a partial run cannot leave a
   // half-indexed version.
-  await query('DELETE FROM octo.embeddings WHERE workspace_id = $1 AND chunk_id IN (SELECT id FROM octo.chunks WHERE document_version_id = $2)', [workspaceId, versionId]);
-  await query('DELETE FROM octo.chunks WHERE document_version_id = $1', [versionId]);
+  await run('DELETE FROM octo.embeddings WHERE workspace_id = $1 AND chunk_id IN (SELECT id FROM octo.chunks WHERE document_version_id = $2)', [workspaceId, versionId]);
+  await run('DELETE FROM octo.chunks WHERE document_version_id = $1', [versionId]);
 
   for (let i = 0; i < chunks.length; i += 1) {
     const chunk = chunks[i]!;
-    const inserted = await query<{ id: string }>(
+    const inserted = await run<{ id: string }>(
       `INSERT INTO octo.chunks
          (workspace_id, document_version_id, config_id, chunk_index, chunk_key, content,
-          start_offset, end_offset, token_estimate)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          start_offset, end_offset, token_estimate, page)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
       [workspaceId, versionId, configId, chunk.chunkIndex, chunk.chunkKey, chunk.content,
-       chunk.startOffset, chunk.endOffset, chunk.tokenEstimate]
+       chunk.startOffset, chunk.endOffset, chunk.tokenEstimate, chunk.page ?? null]
     );
     const chunkId = inserted[0]!.id;
     const vectorLiteral = `[${(vectors[i] ?? []).join(',')}]`;
-    await query(
+    await run(
       `INSERT INTO octo.embeddings (workspace_id, chunk_id, config_id, embedding)
        VALUES ($1, $2, $3, $4::vector)`,
       [workspaceId, chunkId, configId, vectorLiteral]
@@ -1552,16 +1559,24 @@ export async function dbReplaceChunksAndEmbeddings(
   return chunks.length;
 }
 
-/** Workspace-scoped hybrid retrieval: lexical and vector arms fused with RRF. */
+/**
+ * Workspace-scoped hybrid retrieval: lexical and vector arms fused with RRF. The
+ * optional filter is applied inside both arms, before their limits (issue #364).
+ */
 export async function dbMatchChunksHybrid(
   workspaceId: string,
   queryText: string,
   queryVector: number[],
-  matchCount = 10
+  matchCount = 10,
+  filter: { documentIds?: string[]; titlePrefix?: string; latestVersionOnly?: boolean } = {}
 ): Promise<
   Array<{
     chunkId: string;
     documentVersionId: string;
+    documentId: string;
+    title: string;
+    versionNumber: number;
+    page: number | null;
     content: string;
     chunkIndex: number;
     similarity: number | null;
@@ -1574,11 +1589,20 @@ export async function dbMatchChunksHybrid(
 > {
   const literal = `[${queryVector.join(',')}]`;
   return query(
-    `SELECT chunk_id AS "chunkId", document_version_id AS "documentVersionId", content,
-            chunk_index AS "chunkIndex", similarity, lexical_score AS "lexicalScore", score,
-            model, model_version AS "modelVersion", chunker
-     FROM octo.match_chunks_hybrid($1, $2::vector, $3, $4)`,
-    [workspaceId, literal, queryText, matchCount]
+    `SELECT chunk_id AS "chunkId", document_version_id AS "documentVersionId",
+            document_id AS "documentId", title, version_number AS "versionNumber", page,
+            content, chunk_index AS "chunkIndex", similarity, lexical_score AS "lexicalScore",
+            score, model, model_version AS "modelVersion", chunker
+     FROM octo.match_chunks_hybrid($1, $2::vector, $3, $4, $5::uuid[], $6, $7)`,
+    [
+      workspaceId,
+      literal,
+      queryText,
+      matchCount,
+      filter.documentIds && filter.documentIds.length > 0 ? filter.documentIds : null,
+      filter.titlePrefix ? filter.titlePrefix : null,
+      filter.latestVersionOnly === true,
+    ]
   );
 }
 
