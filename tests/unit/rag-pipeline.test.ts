@@ -72,6 +72,23 @@ describe('Chunking', () => {
     expect(chunks[chunks.length - 1]!.endOffset).toBe(text.length);
   });
 
+  it('leaves no text outside every chunk when a chunk ends early on a break (#357)', () => {
+    // A paragraph or sentence break early in each window ends the chunk early;
+    // the next chunk must start from that end, not a fixed step later.
+    const inputs = [
+      ('x'.repeat(450) + '\n\n').repeat(12),
+      ('Short sentence here. ' + 'y'.repeat(430) + '. ').repeat(10),
+      Array.from({ length: 40 }, (_, i) => `## Heading ${i}\n\n${'z'.repeat(100 + ((i * 97) % 600))}`).join('\n\n'),
+    ];
+    for (const text of inputs) {
+      const covered = new Array(text.length).fill(false);
+      for (const chunk of chunkText(text, CONFIG)) {
+        for (let i = chunk.startOffset; i < chunk.endOffset; i += 1) covered[i] = true;
+      }
+      expect(covered.indexOf(false)).toBe(-1);
+    }
+  });
+
   it('produces stable indices and token estimates', () => {
     const chunks = chunkText('word '.repeat(200), CONFIG);
     expect(chunks.map((c) => c.chunkIndex)).toEqual(chunks.map((_, i) => i));

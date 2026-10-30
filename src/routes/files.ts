@@ -7,9 +7,11 @@
 
 import { OctoScope } from '../api/capabilities';
 import { signMediaUrl } from '../media/media-token';
+import { loadEmbeddingConfigFromEnv } from '../rag/embeddings';
+import { isIndexable } from '../rag/ingest';
 import { ensureThumbnail } from '../media/thumbnail-service';
 import { authenticateRequest, authorizeMediaRequest, keyWorkspaceMatches, requireScope, roleAllows, scopeDenied } from '../server/auth-context';
-import { dbClearFilePublished, dbDeleteFileIfIdle, dbFinishFileDelete, dbGetFile, dbGetWorkspaceMembership, dbInsertFile, dbListWorkspaceFiles, dbMarkFilePublished, dbRecordActivity } from '../server/db';
+import { dbClearFilePublished, dbDeleteFileIfIdle, dbEnqueueJob, dbFinishFileDelete, dbGetFile, dbGetWorkspaceMembership, dbInsertFile, dbListWorkspaceFiles, dbMarkFilePublished, dbRecordActivity } from '../server/db';
 import { readJsonObject, requireUuid, sendJson } from '../server/http';
 import { attributeAgentAction } from '../server/ops';
 import { deletePublicObject, ensureActiveBytes, presentFile } from '../server/present';
@@ -159,6 +161,16 @@ export async function handleFilesRoutes(
       'file.uploaded',
       `File ${name} uploaded by agent principal`
     );
+
+    // PDF and text uploads are queued for document search when embeddings are
+    // configured (issue #227). Best-effort: indexing never fails the upload.
+    if (isIndexable(contentType) && loadEmbeddingConfigFromEnv()) {
+      try {
+        await dbEnqueueJob(randomUUID(), workspaceId, 'rag_ingest_file', `rag:${fileId}`, { fileId }, auth.principal.id);
+      } catch (err) {
+        console.error(`Queueing search indexing failed for ${fileId}:`, err);
+      }
+    }
     sendJson(res, 201, fileRecord);
     return true;
   }
