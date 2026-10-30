@@ -62,6 +62,7 @@ function deps(version: DatasetVersionRecord | null) {
     deps: {
       store: STORE,
       loadVersion: async () => version,
+      loadWorkspaceSpec: async () => null,
       registerResult: async (input: Parameters<AnalyticsJobDeps['registerResult']>[0]) => {
         registered.push(input as unknown as Record<string, unknown>);
       },

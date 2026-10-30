@@ -25,6 +25,21 @@ export function useHealth() {
   });
 }
 
+export interface ServiceLink {
+  id: string;
+  label: string;
+  tool: string;
+  url: string | null;
+}
+
+export function useServices() {
+  return useQuery({
+    queryKey: ["services"],
+    staleTime: 5 * 60 * 1000,
+    queryFn: () => api.get<{ services: ServiceLink[] }>("/api/services"),
+  });
+}
+
 export function useWorkspaces(enabled = true) {
   return useQuery({
     queryKey: ["workspaces"],

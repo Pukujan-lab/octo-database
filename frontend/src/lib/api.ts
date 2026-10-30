@@ -1,3 +1,4 @@
+import { clearConfirmed, confirmWindowOpen, markConfirmed } from "./confirm-window";
 import { announceExpiry, clearSession, getToken } from "./session";
 
 export class ApiError extends Error {
@@ -77,6 +78,11 @@ export function qs(params: Record<string, string | number | undefined | null>): 
   return out ? `?${out}` : "";
 }
 
+/** A request carrying confirmation codes; success opens the no-codes window. */
+function isGated(body: unknown): boolean {
+  return typeof body === "object" && body !== null && "confirmSecret" in body;
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const mode = options.authMode ?? "session";
   const headers: HeadersInit = {
@@ -110,8 +116,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     const code = sep === -1 ? raw : raw.slice(0, sep);
     const friendly =
       FRIENDLY[code] ?? (code.startsWith("EGRESS_") ? "The relay could not complete that call." : raw);
+    if (code.startsWith("CONFIRM_") || code === "MFA_CODE_INVALID") clearConfirmed();
     throw new ApiError(friendly, res.status, code);
   }
+
+  // The server's window runs from the request that carried codes, so only that one starts it here.
+  if (isGated(options.body) && !confirmWindowOpen()) markConfirmed();
 
   if (res.status === 204) return undefined as T;
   const text = await res.text();

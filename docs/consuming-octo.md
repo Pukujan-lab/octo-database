@@ -162,11 +162,34 @@ analytics service and nothing to deploy.
 
 Four rules define the surface:
 
-- **The caller never supplies SQL and never supplies an object key.** You name a dataset,
-  a query spec, and ids. The server builds the statement and derives every storage key
-  from the authenticated workspace.
+- **The caller never supplies an object key.** You name a dataset, a query spec, and ids.
+  The server derives every storage key from the authenticated workspace. A dataset can
+  have any schema; the built-in spec `job-failures-by-type-month@1` needs
+  `job_type`, `state` and `created_at`, and checks that when a query is submitted.
+- **SQL is allowed only as a registered workspace spec.** `POST
+  /api/workspaces/<id>/analytics/specs` (write scope) takes `{ slug, dataset, sql, params }`:
+  one `SELECT` that reads the view `data` (the dataset version the query runs over) and
+  `$name` parameters declared as `text`, `integer`, `double`, `boolean`, `date` or
+  `timestamp` (dates and timestamps bind as text; write `CAST($since AS DATE)`). The spec
+  is validated against the dataset's schema and stored as an immutable version
+  `ws:<slug>@<n>`; submit it to `analytics.query` with `"params": { ... }`. DuckDB is
+  locked before the SQL runs: it can read only the mounted dataset parts, not other files,
+  URLs or extensions, and cannot change its own settings.
 - **A registration is immutable.** A re-export is a new version (`v1`, `v2`, …); nothing
   is mutated or overwritten.
+- **Datasets grow by appending.** `POST /api/workspaces/<id>/datasets` with `"append": true`
+  and the same schema adds new `YYYY-MM-DD` partitions as the next version without
+  re-uploading the earlier ones (a partition already present answers `409
+  PARTITION_EXISTS`). Query the newest version with `"dataset": "<slug>"` instead of a
+  `datasetVersionId`; it is pinned at submission.
+- **Schedules write results into your database.** `POST
+  /api/workspaces/<id>/analytics/schedules` takes `{ spec, dataset, params, everyMinutes,
+  sink: { table, mode, keys } }` (write scope). Every `everyMinutes` (5 to 10080), once a
+  new dataset version has landed, the spec runs and its rows are written to
+  `analytics.<table>` in the workspace database as the workspace's own role: `replace`
+  rewrites the table, `upsert` merges on `keys`. The workspace must have a provisioned
+  database and a stored credential (run any workspace query once). `GET` lists schedules,
+  `DELETE .../schedules/<id>` removes one.
 - **Query execution is a job.** Submission returns a job id; poll it, then fetch the
   derived result artifact.
 - **Everything is workspace-fenced.** A dataset version, job, or result belonging to
