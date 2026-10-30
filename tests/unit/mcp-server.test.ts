@@ -11,7 +11,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { describe, expect, it } from 'vitest';
 import { OctoApi } from '../../src/mcp/client';
-import { createOctoMcpServer } from '../../src/mcp/server';
+import { createOctoMcpServer, restrictToCapabilities, TOOL_ACTIONS } from '../../src/mcp/server';
+import { OCTO_CAPABILITIES } from '../../src/api/capabilities';
 
 function apiWith(status: number, body: string, calls: string[] = []): OctoApi {
   const fetchImpl = (async (url: unknown) => {
@@ -50,6 +51,7 @@ describe('Octo MCP adapter', () => {
       'get_document',
       'get_ops_summary',
       'graph_health',
+      'guide',
       'ingest_document',
       'list_documents',
       'list_files',
@@ -419,5 +421,53 @@ describe('Octo MCP adapter', () => {
 
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('403');
+  });
+});
+
+describe('Octo MCP tool surface', () => {
+  it('maps every action it names onto a real capability', () => {
+    const actions = new Set(OCTO_CAPABILITIES.map((capability) => capability.action));
+    for (const [tool, action] of Object.entries(TOOL_ACTIONS)) {
+      expect(actions.has(action), `${tool} -> ${action}`).toBe(true);
+    }
+  });
+
+  it('lists only the tools the key can use', async () => {
+    const granted = OCTO_CAPABILITIES.filter((c) => c.requiredScope === 'read').map((c) => ({ action: c.action }));
+    const api = apiWith(200, JSON.stringify({ capabilities: granted }));
+    const server = createOctoMcpServer(api);
+    const hidden = await restrictToCapabilities(server, api);
+    expect(hidden).toBeGreaterThan(0);
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'octo-test', version: '0.0.0' });
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+
+    expect(names).toContain('list_workspaces');
+    expect(names).toContain('whoami');
+    expect(names).toContain('guide');
+    expect(names).not.toContain('delete_file');
+    expect(names).not.toContain('upload_file');
+    expect(names).not.toContain('create_workspace');
+  });
+
+  it('keeps every tool when the capability lookup fails', async () => {
+    const api = apiWith(500, 'nope');
+    const server = createOctoMcpServer(api);
+    expect(await restrictToCapabilities(server, api)).toBe(0);
+  });
+
+  it('answers guide with a topic list, then with a topic', async () => {
+    const client = await connect(apiWith(200, '{}'));
+    const list = JSON.parse(textOf(await client.callTool({ name: 'guide', arguments: {} })));
+    expect(list.topics).toEqual(expect.arrayContaining(['analytics', 'ledger']));
+    const one = JSON.parse(textOf(await client.callTool({ name: 'guide', arguments: { topic: 'analytics' } })));
+    expect(one.guide).toContain('ws:<slug>@<n>');
+  });
+
+  it('returns compact JSON', async () => {
+    const client = await connect(apiWith(200, '{"a":1}'));
+    expect(textOf(await client.callTool({ name: 'whoami', arguments: {} }))).toBe('{"a":1}');
   });
 });

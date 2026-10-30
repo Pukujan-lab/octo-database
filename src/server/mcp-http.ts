@@ -16,7 +16,7 @@
 import { IncomingMessage, ServerResponse } from 'http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { OctoApi } from '../mcp/client';
-import { createOctoMcpServer } from '../mcp/server';
+import { createOctoMcpServer, restrictToCapabilities } from '../mcp/server';
 
 /** The bearer token from the request, or null when the header is absent. */
 export function bearerToken(req: IncomingMessage): string | null {
@@ -38,6 +38,7 @@ export async function handleMcpRequest(
 ): Promise<void> {
   const api = new OctoApi({ baseUrl: options.baseUrl, token: options.token });
   const server = createOctoMcpServer(api);
+  await restrictToCapabilities(server, api);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
