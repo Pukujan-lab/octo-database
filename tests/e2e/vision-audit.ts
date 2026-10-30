@@ -4,7 +4,11 @@
  * Fork pull requests never receive repository secrets, so the InferHub key is
  * absent there by design. Rather than failing those PRs on an unsatisfiable
  * dependency, the audit is skipped and the skip is reported loudly. Same-repo
- * runs (including every push to main) always perform the real audit.
+ * runs (including every push to main) perform the real audit.
+ *
+ * A provider outage (every model in the fallback chain refusing or erroring) is
+ * treated the same way: the model never judged the screen, so there is nothing to
+ * fail on. A model that answers and scores the screen low still fails the test.
  */
 
 import type { Page } from '@playwright/test';
@@ -34,7 +38,15 @@ export async function auditPage(
   // panel half-transparent and the audit judges a transient frame. Fast-forward
   // finite animations to their end state so the model sees the settled screen.
   const screenshot = await page.screenshot({ fullPage: true, animations: 'disabled' });
-  const result = await verifyUiScreenshotWithVision(screenshot, screenName);
+  let result: VisionVerificationResult;
+  try {
+    result = await verifyUiScreenshotWithVision(screenshot, screenName);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.startsWith('All vision models in fallback chain failed')) throw error;
+    console.log(`[vision-audit] SKIPPED for "${screenName}": the vision provider is unavailable. ${message}`);
+    return null;
+  }
 
   console.log(`[vision-audit] ${screenName} — model=${result.modelUsed} score=${result.score} passed=${result.passed}`);
   console.log(`[vision-audit] ${result.summary}`);
