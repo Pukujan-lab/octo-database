@@ -1,11 +1,11 @@
 # OCTO-0300 Workspace image and video gallery
 
-<!-- continuity:task {"acceptance":["Album and folder media querying with MIME type classification","Derived thumbnail generation and caching without downloading full originals in grid view","Full-screen responsive image lightbox modal","In-browser native HTML5 video player for supported video formats","Fail-closed cross-workspace media authorization preventing unauthorized access","All gates pass across Python, TypeScript, and JSON contracts"],"depends_on":["OCTO-0200"],"goal":"Build private workspace image and video gallery with grid thumbnails, full-screen image view, and responsive media playback","id":"OCTO-0300","issue_url":"https://github.com/Pukujan/octo-database/issues/5","next_action":"Merged in PR #27 with green gates; scoped share links (OCTO-0400) then merged in PR #29.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Enable family and personal users to browse media visually without exposing raw infrastructure or admin controls per Slice 3 / Issue #5."} -->
+<!-- continuity:task {"acceptance":["Album and folder media querying with MIME type classification","Derived thumbnail generation and caching without downloading full originals in grid view","Full-screen responsive image lightbox modal","In-browser native HTML5 video player for supported video formats","Fail-closed cross-workspace media authorization preventing unauthorized access","All gates pass across Python, TypeScript, and JSON contracts"],"depends_on":["OCTO-0200"],"goal":"Build private workspace image and video gallery with grid thumbnails, full-screen image view, and responsive media playback","id":"OCTO-0300","issue_url":"https://github.com/Pukujan-lab/octo-database/issues/5","next_action":"Merged in PR #27 with green gates; scoped share links (OCTO-0400) then merged in PR #29.","owner":"Pukujan; main agent coordinates implementation","priority":"P1","protocol_version":"0.1.0-draft","schema":"project-continuity.task.v1","status":"completed","why":"Enable family and personal users to browse media visually without exposing raw infrastructure or admin controls per Slice 3 / Issue #5."} -->
 
 - Status: completed
 - Priority: P1
 - Branch: `task/OCTO-0300-workspace-gallery`
-- GitHub issue: https://github.com/Pukujan/octo-database/issues/5
+- GitHub issue: https://github.com/Pukujan-lab/octo-database/issues/5
 
 ## Goal
 

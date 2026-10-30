@@ -1,7 +1,17 @@
+# Behind cloudflared every request comes from the tunnel container, so take the
+# client address from Cloudflare's header. Only private (docker/LAN) peers are trusted
+# to set it. JSON access logs carry it as client_ip for CrowdSec and per-key logging.
+{
+    servers {
+        trusted_proxies static private_ranges
+        client_ip_headers Cf-Connecting-Ip X-Forwarded-For
+    }
+}
+
 :80 {
     log {
         output stdout
-        format console
+        format json
     }
 
     # Container liveness responder
