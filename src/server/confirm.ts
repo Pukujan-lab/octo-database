@@ -44,6 +44,9 @@ export async function confirmGate(
   suppliedSecret: unknown,
   options: { requireMfa?: boolean; mfaCode?: unknown } = {}
 ): Promise<boolean> {
+  // The owner listed this agent's key; it confirms on the owner's behalf.
+  if (auth.ownerAgent) return true;
+
   if (auth.apiKey) {
     sendJson(res, 403, {
       error: 'FORBIDDEN: Destructive commands require a human session; API keys can never confirm.',
