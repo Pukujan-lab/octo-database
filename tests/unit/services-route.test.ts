@@ -31,7 +31,7 @@ function call(authed: boolean, method = 'GET', path = '/api/services') {
 }
 
 afterEach(() => {
-  delete process.env['OCTO_PHOENIX_URL'];
+  delete process.env['OCTO_PHOENIX_PUBLIC_URL'];
   delete process.env['OCTO_DEPLOY_URL'];
   delete process.env['OCTO_DEPLOY_TOOL'];
 });
@@ -49,7 +49,7 @@ describe('GET /api/services', () => {
   });
 
   it('returns configured http(s) URLs and drops anything else', async () => {
-    process.env['OCTO_PHOENIX_URL'] = 'https://phoenix.example.test/';
+    process.env['OCTO_PHOENIX_PUBLIC_URL'] = 'https://phoenix.example.test/';
     process.env['OCTO_DEPLOY_URL'] = 'javascript:alert(1)';
     process.env['OCTO_DEPLOY_TOOL'] = 'Coolify';
     const { json } = await call(true);
