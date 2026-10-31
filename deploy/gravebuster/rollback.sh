@@ -16,6 +16,10 @@ COMPOSE_FILES=("-f" "docker-compose.yml")
 if [ -f "docker-compose.edge.yml" ]; then
   COMPOSE_FILES+=("-f" "docker-compose.edge.yml")
 fi
+# Host overlay on the OVH server: embedder, resource limits, Postgres shm.
+if [ -f "docker-compose.vps.yml" ]; then
+  COMPOSE_FILES+=("-f" "docker-compose.vps.yml")
+fi
 
 if [ ! -f "$STATE_FILE" ]; then
   echo "ERROR: No .deploy-state found. Cannot determine rollback target."

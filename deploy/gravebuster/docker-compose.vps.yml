@@ -1,0 +1,31 @@
+# Always-on server overlay: the embedding model runs here on the CPU, and the
+# heavy services get CPU/memory ceilings so a bulk ingest slows itself down
+# instead of the websites.
+services:
+  octo-embed:
+    image: ollama/ollama:0.30.11
+    container_name: octo-embed
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"
+      OLLAMA_NUM_PARALLEL: "2"
+    volumes:
+      - octo-embed-models:/root/.ollama
+    cpus: 4
+    mem_limit: 4g
+    networks:
+      - octo-internal
+
+  octo-db:
+    cpus: 6
+    mem_limit: 12g
+    # HNSW index builds need more than Docker's 64 MB /dev/shm default.
+    shm_size: 4g
+
+  octo-api:
+    cpus: 4
+    mem_limit: 4g
+
+volumes:
+  octo-embed-models:
+    name: octo-embed-models
