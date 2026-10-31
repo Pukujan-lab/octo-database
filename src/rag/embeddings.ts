@@ -16,7 +16,9 @@ export interface EmbeddingConfig {
   dimensions: number;
 }
 
-export const DEFAULT_EMBEDDING_DIMENSIONS = 1024;
+// Stored as halfvec(512) (#386). qwen3-embedding returns 1024 dimensions and is
+// trained for shorter prefixes, so longer vectors are cut and re-normalized.
+export const DEFAULT_EMBEDDING_DIMENSIONS = 512;
 
 /**
  * Loads embedding provider configuration from the environment.
@@ -84,7 +86,9 @@ export async function embedTexts(
     model?: string;
   };
 
-  const vectors = (payload.data ?? []).map((item) => item.embedding ?? []);
+  const vectors = (payload.data ?? []).map((item) =>
+    truncateEmbedding(item.embedding ?? [], config.dimensions)
+  );
   if (vectors.length !== texts.length) {
     throw new Error(
       `EMBEDDING_COUNT_MISMATCH: requested ${texts.length} embeddings, received ${vectors.length}`
@@ -104,4 +108,16 @@ export async function embedTexts(
     model: payload.model ?? config.model,
     dimensions: config.dimensions,
   };
+}
+
+/**
+ * Cuts a Matryoshka embedding to its first `dimensions` values and L2-normalizes
+ * the result. A vector already at (or below) that length is returned unchanged,
+ * so a short vector still fails the dimension check.
+ */
+export function truncateEmbedding(vector: number[], dimensions: number): number[] {
+  if (vector.length <= dimensions) return vector;
+  const head = vector.slice(0, dimensions);
+  const norm = Math.sqrt(head.reduce((sum, x) => sum + x * x, 0));
+  return norm > 0 ? head.map((x) => x / norm) : head;
 }

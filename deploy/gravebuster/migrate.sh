@@ -45,6 +45,9 @@ if [ -z "${MIGRATE_PSQL_CMD:-}" ]; then
   if [ -f "$SCRIPT_DIR/docker-compose.edge.yml" ]; then
     COMPOSE_ARGS="$COMPOSE_ARGS -f $SCRIPT_DIR/docker-compose.edge.yml"
   fi
+  if [ -f "$SCRIPT_DIR/docker-compose.vps.yml" ]; then
+    COMPOSE_ARGS="$COMPOSE_ARGS -f $SCRIPT_DIR/docker-compose.vps.yml"
+  fi
   MIGRATE_PSQL_CMD="docker compose $COMPOSE_ARGS exec -T octo-db psql -v ON_ERROR_STOP=1 -U postgres -d postgres"
 fi
 

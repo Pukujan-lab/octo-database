@@ -145,7 +145,7 @@ async function main(): Promise<void> {
         const chunkId = (inserted.rows[0] as { id: string }).id;
         await tx.query(
           `INSERT INTO octo.embeddings (workspace_id, chunk_id, config_id, embedding)
-           VALUES ($1, $2, $3, $4::vector)`,
+           VALUES ($1, $2, $3, $4::halfvec)`,
           [version.workspace_id, chunkId, configId, `[${vectors[i]!.join(',')}]`]
         );
       }
