@@ -8,6 +8,7 @@
 import { embedTexts, loadEmbeddingConfigFromEnv } from '../rag/embeddings';
 import { RAG_CHUNKER, RAG_CHUNK_OVERLAP, RAG_CHUNK_SIZE, RAG_MODEL_VERSION, embedInBatches, ragChunkConfig } from '../rag/ingest';
 import { chunkKey, chunkText, contentHash, extractText } from '../rag/pipeline';
+import { loadRerankConfigFromEnv, rerankCandidateCount, rerankScores } from '../rag/rerank';
 import { authenticateRequest, keyWorkspaceMatches, requireScope, roleAllows, scopeDenied } from '../server/auth-context';
 import { dbDeleteDocument, dbEnqueueJob, dbEnsureEmbeddingConfig, dbGetArchiveRecord, dbGetDocument, dbGetWorkspaceMembership, dbListDocuments, dbMatchChunksHybrid, dbRenameDocument, dbReplaceChunksAndEmbeddings, dbUpsertDocumentVersion, query } from '../server/db';
 import { readJsonObject, requireUuid, sendJson } from '../server/http';
@@ -168,13 +169,17 @@ export async function handleRagRoutes(
     }
 
     const parsed = (await readJsonObject(req)) as Record<string, any>;
-    const { workspaceId, query, limit, filter } = parsed;
+    const { workspaceId, query, limit, filter, rerank } = parsed;
 
     if (!workspaceId || !query) {
       sendJson(res, 400, { error: 'workspaceId and query are required' });
       return true;
     }
     if (!requireUuid(res, workspaceId, 'workspaceId')) return true;
+    if (rerank !== undefined && typeof rerank !== 'boolean') {
+      sendJson(res, 400, { error: 'rerank must be a boolean' });
+      return true;
+    }
 
     // Optional filter (issue #364), applied inside the search before its limit.
     const documentIds = filter?.documentIds;
@@ -214,12 +219,36 @@ export async function handleRagRoutes(
       return true;
     }
 
+    const rerankConfig = rerank ? loadRerankConfigFromEnv() : null;
+    if (rerank && !rerankConfig) {
+      sendJson(res, 503, { error: 'RERANK_NOT_CONFIGURED: set OCTO_RERANK_URL to rerank results' });
+      return true;
+    }
+
+    const matchLimit = limit ?? 10;
     const { vectors } = await embedTexts(embeddingConfig, [query]);
-    const results = await dbMatchChunksHybrid(workspaceId, query, vectors[0]!, limit ?? 10, {
-      documentIds,
-      titlePrefix,
-      latestVersionOnly,
-    });
+    let results: Array<Awaited<ReturnType<typeof dbMatchChunksHybrid>>[number] & { rerankScore?: number }> =
+      await dbMatchChunksHybrid(
+        workspaceId,
+        query,
+        vectors[0]!,
+        rerankConfig ? rerankCandidateCount(matchLimit) : matchLimit,
+        { documentIds, titlePrefix, latestVersionOnly }
+      );
+
+    // Optional rerank (issue #365): re-score the wider candidate set, then cut to
+    // the limit. When no reranker answers, the hybrid order is kept.
+    let reranked = false;
+    if (rerankConfig) {
+      const scores = await rerankScores(rerankConfig, query, results.map((r) => r.content));
+      if (scores) {
+        results = results
+          .map((r, i) => ({ ...r, rerankScore: scores[i]! }))
+          .sort((a, b) => b.rerankScore - a.rerankScore);
+        reranked = true;
+      }
+      results = results.slice(0, matchLimit);
+    }
 
     sendJson(res, 200, {
       query,
@@ -227,6 +256,7 @@ export async function handleRagRoutes(
       // match reports which arms found it -- `similarity` is null for a chunk only
       // the lexical arm returned, `lexicalScore` null for a vector-only match.
       mode: 'hybrid',
+      ...(rerank ? { reranked } : {}),
       matches: results,
       // Provenance: each match carries its document, title, version, page (PDFs),
       // and the exact embedding/chunker configuration that produced it.

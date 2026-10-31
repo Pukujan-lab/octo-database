@@ -299,10 +299,14 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
         })
         .optional()
         .describe('Restrict which documents are searched'),
+      rerank: z
+        .boolean()
+        .optional()
+        .describe('Re-score the top candidates with the reranker model (slower, better order; off by default)'),
     },
-    async ({ workspaceId, query, limit, filter }) => {
+    async ({ workspaceId, query, limit, filter, rerank }) => {
       try {
-        return asText(await api.query({ workspaceId, query, limit, filter }));
+        return asText(await api.query({ workspaceId, query, limit, filter, rerank }));
       } catch (error) {
         return asError(error);
       }
