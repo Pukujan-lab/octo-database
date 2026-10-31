@@ -163,12 +163,14 @@ export class OctoApi {
     query: string;
     limit?: number;
     filter?: { documentIds?: string[]; titlePrefix?: string; latestVersionOnly?: boolean };
+    rerank?: boolean;
   }): Promise<unknown> {
     return this.request('POST', '/api/rag/query', {
       workspaceId: input.workspaceId,
       query: input.query,
       ...(input.limit === undefined ? {} : { limit: input.limit }),
       ...(input.filter === undefined ? {} : { filter: input.filter }),
+      ...(input.rerank === undefined ? {} : { rerank: input.rerank }),
     });
   }
 
