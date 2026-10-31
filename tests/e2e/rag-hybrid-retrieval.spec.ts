@@ -37,9 +37,9 @@ test.afterEach(async () => {
   created.length = 0;
 });
 
-/** A 1024-dimension one-hot vector; the probe vector picks which axis it lights. */
+/** A 512-dimension one-hot vector; the probe vector picks which axis it lights. */
 function oneHot(axis: number): string {
-  return `[${Array.from({ length: 1024 }, (_, i) => (i + 1 === axis ? '1' : '0')).join(',')}]`;
+  return `[${Array.from({ length: 512 }, (_, i) => (i + 1 === axis ? '1' : '0')).join(',')}]`;
 }
 
 interface Workspace {
@@ -65,7 +65,7 @@ async function seedWorkspace(): Promise<Workspace> {
   const config = await queryService<{ id: string }>(
     `INSERT INTO octo.embedding_configs
        (workspace_id, model, model_version, dimensions, chunker, chunk_size, chunk_overlap)
-     VALUES ($1, 'hybrid-e2e', 'v1', 1024, 'paragraph-aware', 800, 100) RETURNING id`,
+     VALUES ($1, 'hybrid-e2e', 'v1', 512, 'paragraph-aware', 800, 100) RETURNING id`,
     [workspaceId]
   );
 
@@ -101,7 +101,7 @@ async function seedChunk(
   const chunkId = chunk[0]!.id;
 
   await queryService(
-    `INSERT INTO octo.embeddings (workspace_id, chunk_id, config_id, embedding) VALUES ($1, $2, $3, $4::vector)`,
+    `INSERT INTO octo.embeddings (workspace_id, chunk_id, config_id, embedding) VALUES ($1, $2, $3, $4::halfvec)`,
     [ws.workspaceId, chunkId, ws.configId, oneHot(axis)]
   );
 
@@ -126,7 +126,7 @@ async function hybrid(
   return queryService<HybridMatch>(
     `SELECT chunk_id AS "chunkId", content, similarity,
             lexical_score AS "lexicalScore", score
-     FROM octo.match_chunks_hybrid($1, $2::vector, $3, $4)`,
+     FROM octo.match_chunks_hybrid($1, $2::halfvec, $3, $4)`,
     [ws.workspaceId, oneHot(probeAxis), queryText, limit]
   );
 }
@@ -134,7 +134,7 @@ async function hybrid(
 async function vectorOnly(ws: Workspace, probeAxis: number, limit = 10) {
   return queryService<{ chunkId: string; similarity: number }>(
     `SELECT chunk_id AS "chunkId", similarity
-     FROM octo.match_chunks($1, $2::vector, $3, 0)`,
+     FROM octo.match_chunks($1, $2::halfvec, $3, 0)`,
     [ws.workspaceId, oneHot(probeAxis), limit]
   );
 }

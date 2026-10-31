@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { truncateEmbedding } from '../../src/rag/embeddings';
 import {
   chunkKey,
   chunkText,
@@ -144,5 +145,13 @@ describe('Embeddings', () => {
     expect(cosineSimilarity([1, 0, 0], [0, 1, 0])).toBeCloseTo(0);
     expect(cosineSimilarity([1, 0], [0, 0])).toBe(0);
     expect(cosineSimilarity([1, 2], [1, 2, 3])).toBe(0);
+  });
+
+  it('cuts a longer embedding to the stored width and re-normalizes it', () => {
+    const cut = truncateEmbedding([3, 4, 12], 2);
+    expect(cut).toHaveLength(2);
+    expect(cut[0]).toBeCloseTo(0.6);
+    expect(cut[1]).toBeCloseTo(0.8);
+    expect(truncateEmbedding([1, 2], 4)).toEqual([1, 2]);
   });
 });
