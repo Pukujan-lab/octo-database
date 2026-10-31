@@ -328,7 +328,7 @@ export const OCTO_CAPABILITIES: CapabilityDescriptor[] = [
     path: '/api/workspaces/<id>/otel/v1/traces',
     requiredScope: 'write',
     description:
-      'Send OTLP/HTTP traces (protobuf or JSON). Octo forwards them to the workspace\'s own Phoenix project; the project is derived from the workspace, never passed by the caller. Eval scores: POST /api/workspaces/<id>/otel/v1/span_annotations (Phoenix span annotation body).',
+      'Send OTLP/HTTP traces (application/x-protobuf, optionally gzip). Octo forwards them to the workspace\'s own Phoenix project; the project is derived from the workspace, never passed by the caller. Eval scores: POST /api/workspaces/<id>/otel/v1/span_annotations (Phoenix span annotation body).',
   },
   {
     action: 'traces.link',
