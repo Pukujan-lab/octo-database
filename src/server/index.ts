@@ -7,6 +7,7 @@
 
 import { handleAnalyticsRoutes } from '../routes/analytics';
 import { handleTracesRoutes } from '../routes/traces';
+import { handleUxAnalyticsRoutes } from '../routes/ux-analytics';
 import { handleAuthRoutes } from '../routes/auth';
 import { handleCapabilitiesRoutes } from '../routes/capabilities';
 import { handleServicesRoutes } from '../routes/services';
@@ -77,6 +78,7 @@ const ROUTES: RouteHandler[] = [
   handleWorkspaceQueryRoutes,
   handleAnalyticsRoutes,
   handleTracesRoutes,
+  handleUxAnalyticsRoutes,
   handleStaticRoutes,
 ];
 

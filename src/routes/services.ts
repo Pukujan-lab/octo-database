@@ -1,5 +1,5 @@
 /**
- * Links to the hosted services Octo fronts (traces and evals, deploy).
+ * Links to the hosted services Octo fronts (traces and evals, UX analytics, deploy).
  *
  * Octo builds no dashboards for these; the workspace UI shows a button that opens
  * the tool's own UI. The URLs come from the server's configuration, and a service
@@ -12,7 +12,7 @@ import { sendJson } from '../server/http';
 import { IncomingMessage, ServerResponse } from 'http';
 
 interface ServiceLink {
-  id: 'traces' | 'deploy';
+  id: 'traces' | 'ux' | 'deploy';
   label: string;
   tool: string;
   /** Where the tool's own UI lives, or null when the service is not set up. */
@@ -46,6 +46,7 @@ export async function handleServicesRoutes(
 
   const services: ServiceLink[] = [
     { id: 'traces', label: 'Traces and evals', tool: 'Phoenix', url: linkFromEnv('OCTO_PHOENIX_PUBLIC_URL') },
+    { id: 'ux', label: 'UX analytics', tool: 'Umami', url: linkFromEnv('OCTO_UMAMI_PUBLIC_URL') },
     {
       id: 'deploy',
       label: 'Deploy',
