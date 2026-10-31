@@ -26,6 +26,35 @@ services:
     cpus: 4
     mem_limit: 4g
 
+  # Phoenix: the one trace viewer (#268, #342). Agents send traces to Octo, which
+  # forwards them here into the workspace's project. Its data lives in its own
+  # `phoenix` database on octo-db. Traces older than the retention policy are
+  # deleted by Phoenix itself.
+  octo-phoenix:
+    image: arizephoenix/phoenix:version-20.27.0
+    container_name: octo-phoenix
+    restart: unless-stopped
+    environment:
+      PHOENIX_SQL_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@octo-db:5432/phoenix
+      PHOENIX_ENABLE_AUTH: "true"
+      PHOENIX_SECRET: ${PHOENIX_SECRET}
+      PHOENIX_ADMIN_SECRET: ${OCTO_PHOENIX_SECRET}
+      # Login admin@localhost; only read when the phoenix database is first created.
+      PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD: ${PHOENIX_ADMIN_PASSWORD}
+      PHOENIX_DEFAULT_RETENTION_POLICY_DAYS: ${PHOENIX_RETENTION_DAYS:-30}
+      # Served at /phoenix on the Octo hostname; Caddy strips the prefix, so no
+      # extra tunnel route. Octo itself calls http://octo-phoenix:6006.
+      PHOENIX_HOST_ROOT_PATH: /phoenix
+      PHOENIX_ROOT_URL: ${OCTO_PHOENIX_PUBLIC_URL}
+    ports:
+      - "127.0.0.1:6006:6006"
+    depends_on:
+      octo-db:
+        condition: service_healthy
+    mem_limit: 2g
+    networks:
+      - octo-internal
+
 volumes:
   octo-embed-models:
     name: octo-embed-models

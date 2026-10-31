@@ -322,6 +322,21 @@ export const OCTO_CAPABILITIES: CapabilityDescriptor[] = [
     requiredScope: 'delete',
     description: 'Revoke one of this principal\'s API keys. Destructive.',
   },
+  {
+    action: 'traces.ingest',
+    method: 'POST',
+    path: '/api/workspaces/<id>/otel/v1/traces',
+    requiredScope: 'write',
+    description:
+      'Send OTLP/HTTP traces (application/x-protobuf, optionally gzip). Octo forwards them to the workspace\'s own Phoenix project; the project is derived from the workspace, never passed by the caller. Eval scores: POST /api/workspaces/<id>/otel/v1/span_annotations (Phoenix span annotation body).',
+  },
+  {
+    action: 'traces.link',
+    method: 'GET',
+    path: '/api/workspaces/<id>/otel/link',
+    requiredScope: 'read',
+    description: 'Return the URL of the workspace\'s project in the hosted Phoenix trace viewer.',
+  },
 ];
 
 /**
