@@ -24,6 +24,11 @@
         reverse_proxy octo-api:3001
     }
 
+    # Phoenix trace viewer (docker-compose.vps.yml). It has its own login.
+    handle_path /phoenix* {
+        reverse_proxy octo-phoenix:6006
+    }
+
     handle /health {
         reverse_proxy octo-api:3001
     }

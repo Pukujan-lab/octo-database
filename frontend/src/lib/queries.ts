@@ -40,6 +40,16 @@ export function useServices() {
   });
 }
 
+/** The workspace's own project in the hosted trace viewer (Phoenix). */
+export function useTraceLink(workspaceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["trace-link", workspaceId],
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    queryFn: () => api.get<{ project: string; url: string }>(`/api/workspaces/${workspaceId}/otel/link`),
+  });
+}
+
 export function useWorkspaces(enabled = true) {
   return useQuery({
     queryKey: ["workspaces"],
