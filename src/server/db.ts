@@ -1604,7 +1604,7 @@ export async function dbReplaceChunksAndEmbeddings(
     const vectorLiteral = `[${(vectors[i] ?? []).join(',')}]`;
     await run(
       `INSERT INTO octo.embeddings (workspace_id, chunk_id, config_id, embedding)
-       VALUES ($1, $2, $3, $4::vector)`,
+       VALUES ($1, $2, $3, $4::halfvec)`,
       [workspaceId, chunkId, configId, vectorLiteral]
     );
   }
@@ -1646,7 +1646,7 @@ export async function dbMatchChunksHybrid(
             document_id AS "documentId", title, version_number AS "versionNumber", page,
             content, chunk_index AS "chunkIndex", similarity, lexical_score AS "lexicalScore",
             score, model, model_version AS "modelVersion", chunker
-     FROM octo.match_chunks_hybrid($1, $2::vector, $3, $4, $5::uuid[], $6, $7)`,
+     FROM octo.match_chunks_hybrid($1, $2::halfvec, $3, $4, $5::uuid[], $6, $7)`,
     [
       workspaceId,
       literal,
