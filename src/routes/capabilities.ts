@@ -94,6 +94,8 @@ export async function handleCapabilitiesRoutes(
         'files.archive': Boolean(objectStore && archiveDeps),
         'files.restore': Boolean(objectStore && archiveDeps),
         'graph.query': Boolean(graphClient),
+        'traces.ingest': Boolean(process.env['OCTO_PHOENIX_URL']),
+        'traces.link': Boolean(process.env['OCTO_PHOENIX_URL']),
       };
       const supported = [] as typeof capabilities;
       for (const capability of capabilities) {

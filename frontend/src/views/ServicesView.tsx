@@ -3,13 +3,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Panel, StatusPill } from "@/components/portal/Panel";
 import { ErrorState } from "@/components/portal/EmptyState";
 import { errorMessage } from "@/lib/api";
-import { useServices } from "@/lib/queries";
+import { useServices, useTraceLink } from "@/lib/queries";
 import { ExternalLink } from "lucide-react";
 
 /** Hosted services Octo fronts. Each one opens the tool's own UI; Octo builds no
- *  dashboard for them. A service with no URL configured shows as not set up. */
-export function ServicesView() {
+ *  dashboard for them. A service with no URL configured shows as not set up.
+ *  Traces open on this workspace's own Phoenix project. */
+export function ServicesView({ workspaceId }: { workspaceId: string }) {
   const services = useServices();
+  const tracesReady = Boolean(services.data?.services.some((s) => s.id === "traces" && s.url));
+  const traceLink = useTraceLink(workspaceId, tracesReady);
 
   return (
     <div data-testid="view-services" className="animate-fade-rise space-y-6">
@@ -18,7 +21,11 @@ export function ServicesView() {
         <ErrorState title="Could not load services" detail={errorMessage(services.error)} />
       ) : null}
       <div className="grid gap-6 md:grid-cols-2">
-        {(services.data?.services ?? []).map((service) => (
+        {(services.data?.services ?? [])
+          .map((service) =>
+            service.id === "traces" && service.url && traceLink.data ? { ...service, url: traceLink.data.url } : service,
+          )
+          .map((service) => (
           <Panel
             key={service.id}
             title={service.label}

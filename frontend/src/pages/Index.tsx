@@ -166,7 +166,7 @@ export default function Index() {
             {view === "gallery" ? <GalleryView workspaceId={workspace.id} data={data} /> : null}
             {view === "operations" ? <OperationsView workspaceId={workspace.id} data={data} /> : null}
             {view === "analytics" ? <AnalyticsView workspaceId={workspace.id} /> : null}
-            {view === "services" ? <ServicesView /> : null}
+            {view === "services" ? <ServicesView workspaceId={workspace.id} /> : null}
             {view === "access" ? (
               <AccessView
                 workspace={workspace}

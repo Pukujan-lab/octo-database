@@ -45,7 +45,7 @@ export async function handleServicesRoutes(
   }
 
   const services: ServiceLink[] = [
-    { id: 'traces', label: 'Traces and evals', tool: 'Phoenix', url: linkFromEnv('OCTO_PHOENIX_URL') },
+    { id: 'traces', label: 'Traces and evals', tool: 'Phoenix', url: linkFromEnv('OCTO_PHOENIX_PUBLIC_URL') },
     {
       id: 'deploy',
       label: 'Deploy',
