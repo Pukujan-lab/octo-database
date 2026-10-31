@@ -85,9 +85,12 @@ RETURNS TABLE (
     chunker TEXT
 ) AS $$
     WITH gate AS (
-        SELECT octo.is_workspace_member(target_workspace)
-           AND (octo.current_workspace_id() IS NULL
-                OR octo.current_workspace_id() = target_workspace) AS allowed
+        -- A login role that bypasses row security (the service pool, the owner)
+        -- saw every row before; it still does.
+        SELECT (SELECT r.rolsuper OR r.rolbypassrls FROM pg_roles r WHERE r.rolname = session_user)
+            OR (octo.is_workspace_member(target_workspace)
+                AND (octo.current_workspace_id() IS NULL
+                     OR octo.current_workspace_id() = target_workspace)) AS allowed
     ),
     params AS (
         SELECT (filter_document_ids IS NOT NULL
