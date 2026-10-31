@@ -2309,6 +2309,40 @@ export async function dbGetWorkspaceById(workspaceId: string): Promise<{
   return rows[0] ?? null;
 }
 
+/** The workspace's Umami team and website (#400), or nulls when UX analytics is off. */
+export async function dbGetWorkspaceUmami(
+  workspaceId: string
+): Promise<{ teamId: string | null; websiteId: string | null } | null> {
+  const rows = await queryService<{ teamId: string | null; websiteId: string | null }>(
+    `SELECT umami_team_id AS "teamId", umami_website_id AS "websiteId" FROM octo.workspaces WHERE id = $1`,
+    [workspaceId]
+  );
+  return rows[0] ?? null;
+}
+
+/** Stores the Umami ids once; returns false when the workspace already has a website. */
+export async function dbSetWorkspaceUmami(workspaceId: string, teamId: string, websiteId: string): Promise<boolean> {
+  const rows = await queryService<{ id: string }>(
+    `UPDATE octo.workspaces SET umami_team_id = $2, umami_website_id = $3
+     WHERE id = $1 AND umami_website_id IS NULL RETURNING id`,
+    [workspaceId, teamId, websiteId]
+  );
+  return rows.length > 0;
+}
+
+/** Members with their emails, for adding them to the workspace's Umami team. */
+export async function dbListWorkspaceMemberEmails(
+  workspaceId: string
+): Promise<{ principalId: string; email: string; role: string }[]> {
+  return queryService(
+    `SELECT m.principal_id AS "principalId", p.email, m.role
+     FROM octo.workspace_memberships m JOIN octo.principals p ON p.id = m.principal_id
+     WHERE m.workspace_id = $1 AND p.email <> ''
+     ORDER BY m.created_at`,
+    [workspaceId]
+  );
+}
+
 /** Thrown by dbCreateWorkspaceAtomic when the Slice 16 rolling-day quota is spent. */
 export const WORKSPACE_DAILY_LIMIT = 'WORKSPACE_DAILY_LIMIT';
 

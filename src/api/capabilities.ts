@@ -337,6 +337,21 @@ export const OCTO_CAPABILITIES: CapabilityDescriptor[] = [
     requiredScope: 'read',
     description: 'Return the URL of the workspace\'s project in the hosted Phoenix trace viewer.',
   },
+  {
+    action: 'ux_analytics.enable',
+    method: 'POST',
+    path: '/api/workspaces/<id>/ux-analytics',
+    requiredScope: 'write',
+    description:
+      'Turn on UX analytics (Umami: clicks, session replays with every form field masked, heatmaps) for the workspace. Body { domain }. Owner or admin. Creates the workspace\'s Umami website once, adds its members, and returns the tracking tags. GET the same path for the current state.',
+  },
+  {
+    action: 'ux_analytics.link',
+    method: 'GET',
+    path: '/api/workspaces/<id>/ux-analytics/link',
+    requiredScope: 'read',
+    description: 'Return a URL that signs the caller in to Umami on the workspace\'s website.',
+  },
 ];
 
 /**
@@ -405,7 +420,7 @@ export function capabilitiesForScopes(scopes: string[]): CapabilityDescriptor[] 
 
 /** Workspace role required for the operations exposed by the current inventory. */
 export function minimumRoleForCapability(action: string): 'member' | 'operator' | 'admin' {
-  if (action === 'files.delete' || action === 'rag.delete') return 'admin';
+  if (action === 'files.delete' || action === 'rag.delete' || action === 'ux_analytics.enable') return 'admin';
   if (
     ['files.upload', 'files.publish', 'files.unpublish', 'files.archive', 'files.restore', 'jobs.enqueue', 'jobs.run', 'epistemic.record', 'graph.project', 'rag.ingest', 'rag.rename'].includes(
       action

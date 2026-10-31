@@ -7,10 +7,11 @@
 
 import { hashApiKeySecret } from '../api/keys';
 import { encryptSecret } from '../lib/mfa';
+import { deleteUmamiWebsite, umamiConfigured } from '../lib/umami';
 import { authenticateRequest, effectiveWorkspaceRole, requireScope, scopeDenied } from '../server/auth-context';
 import { autoProvisionWorkspaceDatabase } from '../server/auto-provision';
 import { confirmGate } from '../server/confirm';
-import { dbCountTransientFiles, dbCreateWorkspaceAtomic, dbDeleteWorkspaceAtomic, dbGetAuthorizedWorkspaces, dbGetWorkspaceById, dbGetWorkspaceDatabase, dbGetWorkspaceMembership, dbInsertWorkspaceDatabase, dbListWorkspaceStorageKeys, dbRecordActivity, dbSetWorkspaceDatabaseCredential, query } from '../server/db';
+import { dbCountTransientFiles, dbCreateWorkspaceAtomic, dbDeleteWorkspaceAtomic, dbGetAuthorizedWorkspaces, dbGetWorkspaceById, dbGetWorkspaceDatabase, dbGetWorkspaceMembership, dbGetWorkspaceUmami, dbInsertWorkspaceDatabase, dbListWorkspaceStorageKeys, dbRecordActivity, dbSetWorkspaceDatabaseCredential, query } from '../server/db';
 import { readJsonObject, sendJson } from '../server/http';
 import { dropProvisionedDatabase, provisionDatabase, provisioningConfigured } from '../server/provisioning';
 import { graphClient, UUID_PATTERN } from '../server/runtime';
@@ -264,6 +265,7 @@ export async function handleWorkspacesRoutes(
     // Read the catalog row before the delete: the cascade removes it, and the
     // database and role it names are not reachable by any cascade.
     const provisioned = await dbGetWorkspaceDatabase(workspaceId);
+    const umami = await dbGetWorkspaceUmami(workspaceId);
 
     // The transaction re-checks the transient state, closing the window between
     // the pre-check above and the delete.
@@ -309,6 +311,18 @@ export async function handleWorkspacesRoutes(
           err instanceof Error ? err.message : String(err)
         );
         orphanedGraph = true;
+      }
+    }
+
+    // The workspace's Umami website and team (#400) go with it. Best effort too.
+    if (umami?.websiteId && umamiConfigured()) {
+      try {
+        await deleteUmamiWebsite(umami.teamId, umami.websiteId);
+      } catch (err) {
+        console.error(
+          `[workspaces] failed to delete Umami website ${umami.websiteId}:`,
+          err instanceof Error ? err.message : String(err)
+        );
       }
     }
 

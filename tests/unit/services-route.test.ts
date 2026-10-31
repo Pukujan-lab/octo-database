@@ -45,7 +45,7 @@ describe('GET /api/services', () => {
 
   it('reports a service with no URL as not set up', async () => {
     const { json } = await call(true);
-    expect(json.services.map((s: { url: unknown }) => s.url)).toEqual([null, null]);
+    expect(json.services.map((s: { url: unknown }) => s.url)).toEqual([null, null, null]);
   });
 
   it('returns configured http(s) URLs and drops anything else', async () => {
@@ -54,6 +54,6 @@ describe('GET /api/services', () => {
     process.env['OCTO_DEPLOY_TOOL'] = 'Coolify';
     const { json } = await call(true);
     expect(json.services[0]).toMatchObject({ id: 'traces', tool: 'Phoenix', url: 'https://phoenix.example.test/' });
-    expect(json.services[1]).toMatchObject({ id: 'deploy', tool: 'Coolify', url: null });
+    expect(json.services[2]).toMatchObject({ id: 'deploy', tool: 'Coolify', url: null });
   });
 });

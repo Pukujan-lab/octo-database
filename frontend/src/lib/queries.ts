@@ -50,6 +50,17 @@ export function useTraceLink(workspaceId: string, enabled: boolean) {
   });
 }
 
+export type UxAnalytics = { enabled: boolean; websiteId: string | null; tags: string | null };
+
+/** The workspace's UX analytics (Umami) website, if it is turned on. */
+export function useUxAnalytics(workspaceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["ux-analytics", workspaceId],
+    enabled,
+    queryFn: () => api.get<UxAnalytics>(`/api/workspaces/${workspaceId}/ux-analytics`),
+  });
+}
+
 export function useWorkspaces(enabled = true) {
   return useQuery({
     queryKey: ["workspaces"],

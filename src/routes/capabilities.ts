@@ -8,6 +8,7 @@
 import { AUTH_GUIDANCE, capabilitiesForScopes, minimumRoleForCapability } from '../api/capabilities';
 import { authenticateRequest, effectiveWorkspaceRole, keyWorkspaceMatches, roleMeetsMinimum } from '../server/auth-context';
 import { dbGetWorkspaceById, dbGetWorkspaceMembership } from '../server/db';
+import { umamiConfigured } from '../lib/umami';
 import { sendJson } from '../server/http';
 import { archiveDeps, graphClient, objectStore, publicTarget, UUID_PATTERN } from '../server/runtime';
 import { WorkspaceRole } from '../types/auth';
@@ -96,6 +97,8 @@ export async function handleCapabilitiesRoutes(
         'graph.query': Boolean(graphClient),
         'traces.ingest': Boolean(process.env['OCTO_PHOENIX_URL']),
         'traces.link': Boolean(process.env['OCTO_PHOENIX_URL']),
+        'ux_analytics.enable': umamiConfigured(),
+        'ux_analytics.link': umamiConfigured(),
       };
       const supported = [] as typeof capabilities;
       for (const capability of capabilities) {
