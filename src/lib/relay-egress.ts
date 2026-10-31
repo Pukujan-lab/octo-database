@@ -6,6 +6,7 @@
  */
 
 import type { IncomingMessage } from 'node:http';
+import { Transform } from 'node:stream';
 
 export const TEMP_KEY_PATTERN = /octo_tmp_[A-Za-z0-9_-]+/;
 const TEMP_KEY_GLOBAL = /octo_tmp_[A-Za-z0-9_-]+/g;
@@ -23,6 +24,12 @@ export interface BuiltUpstreamRequest {
   url: string;
   headers: Record<string, string>;
   body: Buffer | null;
+  /** The injected secret, kept so a same-origin redirect can re-inject it. */
+  secret: string;
+  /** The query parameter the secret rides in, for the `query` scheme. */
+  queryParam: string | null;
+  /** Every spelling of the secret the vendor could echo back; scrubbed from the response. */
+  secretForms: string[];
 }
 
 type IncomingHttpHeadersLike = Record<string, string | string[] | undefined>;
@@ -212,7 +219,7 @@ export function buildUpstreamRequest(input: {
   if (upstream.origin !== base.origin) {
     return { error: 'EGRESS_URL_INVALID', status: 400 };
   }
-  return { url: upstream.toString(), headers, body: applied.body };
+  return withSecret({ url: upstream.toString(), headers, body: applied.body }, input.route, input.secret);
 }
 
 /**
@@ -251,7 +258,129 @@ export function buildProxyRequest(input: {
   if ('error' in applied) return applied;
   stripTempKey(upstream, applied.pathHandled);
 
-  return { url: upstream.toString(), headers, body: applied.body };
+  return withSecret({ url: upstream.toString(), headers, body: applied.body }, input.route, input.secret);
+}
+
+function withSecret(
+  built: Pick<BuiltUpstreamRequest, 'url' | 'headers' | 'body'>,
+  route: RelayRoute,
+  secret: string
+): BuiltUpstreamRequest {
+  return {
+    ...built,
+    secret,
+    queryParam: route.authScheme === 'query' ? route.authHeader : null,
+    secretForms: secretForms(route, secret),
+  };
+}
+
+/**
+ * Secrets shorter than this are not scrubbed from response bodies: replacing
+ * a two-character string everywhere would corrupt every answer, and a secret
+ * that short is not a secret.
+ */
+const MIN_SCRUB_LENGTH = 8;
+
+/**
+ * The spellings of the secret a vendor can hand back: raw, URL-encoded (as a
+ * path or as a form value), and the Basic credential it was sent inside.
+ * Longest first, so a longer form is replaced before a shorter one inside it.
+ */
+export function secretForms(route: RelayRoute, secret: string): string[] {
+  const forms = new Set<string>([
+    secret,
+    encodeURIComponent(secret),
+    new URLSearchParams({ k: secret }).toString().slice(2),
+  ]);
+  if (route.authScheme === 'basic') {
+    const user = route.basicUsername || route.itemUsername || '';
+    forms.add(Buffer.from(`${user}:${secret}`).toString('base64'));
+  }
+  return Array.from(forms)
+    .filter((form) => form.length >= MIN_SCRUB_LENGTH)
+    .sort((a, b) => b.length - a.length);
+}
+
+export const SECRET_PLACEHOLDER = 'octo_secret_redacted';
+
+/** Replaces every form of the secret in a string. */
+export function scrubSecrets(text: string, forms: string[]): string {
+  let out = text;
+  for (const form of forms) out = out.split(form).join(SECRET_PLACEHOLDER);
+  return out;
+}
+
+/**
+ * A byte-safe stream filter that removes the secret from a response body,
+ * including a secret split across chunks: it holds back the last
+ * `longest - 1` bytes of each chunk until the next one arrives.
+ */
+export function createSecretScrubber(forms: string[]): Transform {
+  // latin1 maps bytes 1:1 to chars, so binary bodies pass through untouched.
+  const binaryForms = forms.map((form) => Buffer.from(form, 'utf8').toString('latin1'));
+  const hold = Math.max(0, ...binaryForms.map((form) => form.length - 1));
+  let carry = '';
+  return new Transform({
+    transform(chunk: Buffer, _encoding, done) {
+      const text = scrubSecrets(carry + chunk.toString('latin1'), binaryForms);
+      const cut = Math.max(0, text.length - hold);
+      carry = text.slice(cut);
+      done(null, Buffer.from(text.slice(0, cut), 'latin1'));
+    },
+    flush(done) {
+      done(null, Buffer.from(scrubSecrets(carry, binaryForms), 'latin1'));
+    },
+  });
+}
+
+/**
+ * What to do with a vendor redirect. A same-origin hop is followed here, with
+ * the secret re-injected, so the caller gets the final answer and never sees a
+ * `Location` carrying the secret. A cross-origin hop is never followed (that
+ * would hand the secret to another host); it goes back to the caller with the
+ * secret scrubbed from an absolute `Location`.
+ *
+ * A body that was streamed and not buffered cannot be replayed, so a 307/308
+ * for one is passed back rather than followed. 301/302/303 on a non-GET turn
+ * into a bodyless GET, as browsers and `fetch` do.
+ */
+export function planRedirect(input: {
+  built: BuiltUpstreamRequest;
+  status: number;
+  location: string;
+  method: string;
+  streamedBody: boolean;
+}):
+  | { follow: true; built: BuiltUpstreamRequest; method: string; location: string }
+  | { follow: false; location: string } {
+  const current = new URL(input.built.url);
+  let next: URL;
+  try {
+    next = new URL(input.location, current);
+  } catch {
+    return { follow: false, location: scrubSecrets(input.location, input.built.secretForms) };
+  }
+  const absolute = scrubSecrets(next.toString(), input.built.secretForms);
+  if (next.origin !== current.origin || (next.protocol !== 'http:' && next.protocol !== 'https:')) {
+    return { follow: false, location: absolute };
+  }
+
+  const keepsMethod = input.status === 307 || input.status === 308;
+  const method = keepsMethod || input.method === 'GET' || input.method === 'HEAD' ? input.method : 'GET';
+  if (keepsMethod && input.streamedBody && method !== 'GET' && method !== 'HEAD') {
+    return { follow: false, location: absolute };
+  }
+
+  if (input.built.queryParam) next.searchParams.set(input.built.queryParam, input.built.secret);
+  const headers = { ...input.built.headers };
+  let body = input.built.body;
+  if (method !== input.method) {
+    body = null;
+    for (const name of Object.keys(headers)) {
+      if (/^content-(length|type)$/i.test(name)) delete headers[name];
+    }
+  }
+  return { follow: true, built: { ...input.built, url: next.toString(), headers, body }, method, location: absolute };
 }
 
 /** Replaces every leaf exactly equal to the temp key, reporting whether one matched. */

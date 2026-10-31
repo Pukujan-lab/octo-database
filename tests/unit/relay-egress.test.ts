@@ -4,7 +4,10 @@ import {
   buildProxyRequest,
   buildUpstreamRequest,
   classifyUpstream,
+  createSecretScrubber,
   extractTempKey,
+  planRedirect,
+  secretForms,
   redactTempKeys,
   replaceJsonLeaves,
   type RelayRoute,
@@ -281,5 +284,75 @@ describe('health and redaction', () => {
     const text = `failed for ${KEY} at /x`;
     expect(redactTempKeys(text)).not.toContain(KEY);
     expect(redactTempKeys(text)).toContain('octo_tmp_<redacted>');
+  });
+});
+
+describe('secret scrubbing', () => {
+  const forms = secretForms(route({ authScheme: 'basic', basicUsername: 'me' }), 'real/secret+value');
+
+  it('covers the raw, URL-encoded, form-encoded and Basic spellings', () => {
+    expect(forms).toEqual(
+      expect.arrayContaining([
+        'real/secret+value',
+        'real%2Fsecret%2Bvalue',
+        Buffer.from('me:real/secret+value').toString('base64'),
+      ])
+    );
+  });
+
+  it('skips secrets too short to scrub without corrupting every body', () => {
+    expect(secretForms(route(), 'abc')).toEqual([]);
+  });
+
+  it('removes a secret split across body chunks and leaves other bytes alone', async () => {
+    const scrubber = createSecretScrubber(forms);
+    const out: Buffer[] = [];
+    scrubber.on('data', (chunk: Buffer) => out.push(chunk));
+    const done = new Promise((resolve) => scrubber.on('end', resolve));
+    for (const piece of ['{"echo":"real/se', 'cret+val', 'ue","bin":"\u00ff"}']) scrubber.write(Buffer.from(piece));
+    scrubber.end();
+    await done;
+    expect(Buffer.concat(out).toString('utf8')).toBe('{"echo":"octo_secret_redacted","bin":"\u00ff"}');
+  });
+});
+
+describe('planRedirect', () => {
+  const built = buildProxyRequest({
+    targetUrl: 'https://api.vendor.test/v1/things?version=2',
+    route: route({ authScheme: 'query', authHeader: 'key' }),
+    secret: 'real-secret-value',
+    tempKey: KEY,
+    headers: {},
+    body: null,
+  });
+  if ('error' in built) throw new Error(built.error);
+
+  it('follows a same-origin hop and re-injects the query secret', () => {
+    const plan = planRedirect({ built, status: 302, location: '/v1/things-v2?version=2', method: 'GET', streamedBody: false });
+    expect(plan.follow).toBe(true);
+    if (!plan.follow) return;
+    expect(new URL(plan.built.url).searchParams.get('key')).toBe('real-secret-value');
+    expect(plan.location).not.toContain('real-secret-value');
+  });
+
+  it('refuses a cross-origin hop and scrubs its Location', () => {
+    const plan = planRedirect({
+      built,
+      status: 302,
+      location: 'https://evil.test/?key=real-secret-value',
+      method: 'GET',
+      streamedBody: false,
+    });
+    expect(plan).toEqual({ follow: false, location: 'https://evil.test/?key=octo_secret_redacted' });
+  });
+
+  it('does not replay a streamed body on 307', () => {
+    const plan = planRedirect({ built, status: 307, location: '/v1/other', method: 'POST', streamedBody: true });
+    expect(plan.follow).toBe(false);
+  });
+
+  it('turns a POST into a bodyless GET on 303', () => {
+    const plan = planRedirect({ built, status: 303, location: '/v1/other', method: 'POST', streamedBody: true });
+    expect(plan.follow && plan.method).toBe('GET');
   });
 });
