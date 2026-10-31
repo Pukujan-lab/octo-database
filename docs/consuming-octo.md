@@ -431,6 +431,12 @@ scheme, forwards the request, and streams the vendor's response back. The workin
 is stripped from every position the scheme does not use, so it never reaches the
 vendor. The path and query are forwarded unchanged.
 
+The stored secret never comes back to you. When the vendor redirects to its own
+origin, the proxy follows it (up to 5 hops) with the secret re-injected and returns
+the final answer. A redirect to another origin is not followed; you get the `3xx`
+with an absolute `Location`. Any spelling of the secret the vendor echoes in a
+response header or the body is replaced with `octo_secret_redacted`.
+
 The proxy accepts the working key in any of the usual positions — `Authorization:
 Bearer`, `Basic` (either half), `x-api-key`, the path, or a query parameter — and
 refuses two *different* keys in two positions. The scheme decides how the stored secret

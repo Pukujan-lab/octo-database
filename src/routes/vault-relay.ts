@@ -23,8 +23,11 @@ import {
   buildProxyRequest,
   buildUpstreamRequest,
   classifyUpstream,
+  createSecretScrubber,
   extractTempKey,
+  planRedirect,
   redactTempKeys,
+  scrubSecrets,
   type BuiltUpstreamRequest,
 } from '../lib/relay-egress';
 import { parseLeaseDays } from '../lib/vault-policy';
@@ -59,7 +62,7 @@ function readBodyLimited(req: IncomingMessage, max: number): Promise<Buffer | nu
   return promise;
 }
 
-function upstreamHeaders(headers: Headers): Record<string, string> {
+function upstreamHeaders(headers: Headers, secretForms: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [name, value] of Array.from(headers.entries())) {
     const lower = name.toLowerCase();
@@ -72,7 +75,7 @@ function upstreamHeaders(headers: Headers): Record<string, string> {
     ) {
       continue;
     }
-    out[name] = value;
+    out[name] = scrubSecrets(value, secretForms);
   }
   return out;
 }
@@ -144,9 +147,16 @@ async function relay(req: IncomingMessage, res: ServerResponse, url: URL, routeK
   });
 }
 
+/** Same-origin vendor redirects followed before the hop goes back to the caller. */
+const MAX_REDIRECTS = 5;
+
 /**
  * Sends the built request upstream and streams the answer back. Shared by the
  * pinned route relay and the free-form proxy so both behave identically.
+ *
+ * The stored secret never comes back to the caller: same-origin redirects are
+ * followed here (see planRedirect), and every response header and the body
+ * are scrubbed of the secret before they are forwarded.
  */
 async function forwardUpstream(input: {
   req: IncomingMessage;
@@ -161,35 +171,62 @@ async function forwardUpstream(input: {
   input.req.on('aborted', () => controller.abort());
   input.res.on('close', () => controller.abort());
 
-  const streamedBody =
-    input.hasBody && !input.buffered ? (Readable.toWeb(input.req) as unknown as ReadableStream) : input.buffered;
+  const streamed = input.hasBody && !input.buffered;
+  let body: ReadableStream | Buffer | null = streamed ? (Readable.toWeb(input.req) as unknown as ReadableStream) : input.buffered;
+  let built = input.built;
+  let method = input.method;
+  let location: string | null = null;
 
   let upstream: Response;
-  try {
-    upstream = await fetch(input.built.url, {
-      method: input.method,
-      headers: input.built.headers,
-      body: streamedBody,
-      duplex: 'half',
-      redirect: 'manual',
-      signal: controller.signal,
-    } as RequestInit);
-  } catch (error) {
-    const detail = redactTempKeys(error instanceof Error ? error.message : String(error));
-    input.onUpstream?.('error', detail);
-    if (!input.res.headersSent) sendJson(input.res, 502, { error: 'EGRESS_FAILED: the vendor did not answer.' });
-    return true;
+  for (let hop = 0; ; hop++) {
+    try {
+      upstream = await fetch(built.url, {
+        method,
+        headers: built.headers,
+        body,
+        duplex: 'half',
+        redirect: 'manual',
+        signal: controller.signal,
+      } as RequestInit);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const detail = scrubSecrets(redactTempKeys(message), built.secretForms);
+      input.onUpstream?.('error', detail);
+      if (!input.res.headersSent) sendJson(input.res, 502, { error: 'EGRESS_FAILED: the vendor did not answer.' });
+      return true;
+    }
+
+    const rawLocation = upstream.status >= 300 && upstream.status < 400 ? upstream.headers.get('location') : null;
+    if (!rawLocation) break;
+    const plan = planRedirect({ built, status: upstream.status, location: rawLocation, method, streamedBody: streamed });
+    if (!plan.follow || hop >= MAX_REDIRECTS) {
+      location = plan.location;
+      break;
+    }
+    await upstream.body?.cancel().catch(() => undefined);
+    built = plan.built;
+    method = plan.method;
+    body = built.body;
   }
 
   input.onUpstream?.(upstream.status);
 
-  input.res.writeHead(upstream.status, upstreamHeaders(upstream.headers));
+  const headers = upstreamHeaders(upstream.headers, built.secretForms);
+  if (location !== null) {
+    for (const name of Object.keys(headers)) if (name.toLowerCase() === 'location') delete headers[name];
+    headers['location'] = location;
+  }
+  input.res.writeHead(upstream.status, headers);
   if (!upstream.body) {
     input.res.end();
     return true;
   }
   try {
-    await pipeline(Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]), input.res);
+    await pipeline(
+      Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]),
+      createSecretScrubber(built.secretForms),
+      input.res
+    );
   } catch {
     // Headers are already out; killing the socket is the only honest answer.
     input.res.destroy();
