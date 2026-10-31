@@ -18,9 +18,13 @@ export interface RerankConfig {
   model: string;
 }
 
-/** How many hybrid candidates the reranker sees for a final `limit`. */
+/**
+ * How many hybrid candidates the reranker sees for a final `limit`. Kept small: on
+ * the Pro's M1 the cross-encoder scores about 2,000 tokens a second, so 20
+ * candidates add roughly 2-4 s to a warm query.
+ */
 export function rerankCandidateCount(limit: number): number {
-  return Math.min(Math.max(limit * 3, 30), 100);
+  return Math.min(Math.max(limit * 2, 20), 50);
 }
 
 export function loadRerankConfigFromEnv(): RerankConfig | null {
