@@ -302,7 +302,7 @@ export function createOctoMcpServer(api: OctoApi): McpServer {
       rerank: z
         .boolean()
         .optional()
-        .describe('Re-score the top candidates with the reranker model (slower, better order; off by default)'),
+        .describe('Re-score the top candidates with the reranker model (on by default when one is configured; false skips it)'),
     },
     async ({ workspaceId, query, limit, filter, rerank }) => {
       try {

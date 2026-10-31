@@ -219,8 +219,10 @@ export async function handleRagRoutes(
       return true;
     }
 
-    const rerankConfig = rerank ? loadRerankConfigFromEnv() : null;
-    if (rerank && !rerankConfig) {
+    // Rerank is on by default wherever a reranker is configured; `rerank: false`
+    // skips it, and an explicit `rerank: true` without one is an error.
+    const rerankConfig = rerank === false ? null : loadRerankConfigFromEnv();
+    if (rerank === true && !rerankConfig) {
       sendJson(res, 503, { error: 'RERANK_NOT_CONFIGURED: set OCTO_RERANK_URL to rerank results' });
       return true;
     }
@@ -236,7 +238,7 @@ export async function handleRagRoutes(
         { documentIds, titlePrefix, latestVersionOnly }
       );
 
-    // Optional rerank (issue #365): re-score the wider candidate set, then cut to
+    // Rerank (issue #365): re-score the wider candidate set, then cut to
     // the limit. When no reranker answers, the hybrid order is kept.
     let reranked = false;
     if (rerankConfig) {
@@ -256,7 +258,7 @@ export async function handleRagRoutes(
       // match reports which arms found it -- `similarity` is null for a chunk only
       // the lexical arm returned, `lexicalScore` null for a vector-only match.
       mode: 'hybrid',
-      ...(rerank ? { reranked } : {}),
+      ...(rerankConfig ? { reranked } : {}),
       matches: results,
       // Provenance: each match carries its document, title, version, page (PDFs),
       // and the exact embedding/chunker configuration that produced it.

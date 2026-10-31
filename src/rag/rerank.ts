@@ -1,16 +1,15 @@
 /**
- * Optional reranking for retrieval (issue #365, part 3).
+ * Reranking for retrieval (issue #365, part 3).
  *
- * With `rerank: true` on a query, the hybrid search returns a wider candidate set
- * and a small cross-encoder (bge-reranker-v2-m3 served by llama.cpp `llama-server
- * --reranking`, behind llama-swap so it starts cold on demand) re-scores each
- * candidate against the query. Off by default; the response shape is unchanged
- * apart from `rerankScore` on each match.
+ * When OCTO_RERANK_URL is set, every query (unless it sends `rerank: false`) takes a
+ * wider hybrid candidate set and a small cross-encoder (bge-reranker-v2-m3 served by
+ * llama.cpp `llama-server --reranking`, behind llama-swap so it starts cold on
+ * demand) re-scores each candidate against the query. The response shape is unchanged apart from
+ * `rerankScore` on each match and `reranked` on the response.
  *
  * Env:
- *   OCTO_RERANK_URL     base URL of a `/v1/rerank` server, e.g. http://agents.tail7065c3.ts.net:6787/v1.
- *                       Several comma-separated URLs are tried in order (a GPU machine,
- *                       then a local one).
+ *   OCTO_RERANK_URL     base URL of a `/v1/rerank` server, e.g. http://host.docker.internal:8095/v1.
+ *                       Several comma-separated URLs are tried in order.
  *   OCTO_RERANK_MODEL   model name sent to the server (default bge-reranker)
  */
 
