@@ -11,7 +11,8 @@
 -- front: the caller is a member of target_workspace, and the request's tenant
 -- fence (request.workspace_id) is unset or equals it. Every table access inside
 -- is already scoped to target_workspace, so it returns no rows the policies would
--- have hidden.
+-- have hidden. A login role that bypasses row security (the service pool) is
+-- let through as before.
 
 CREATE OR REPLACE FUNCTION octo.match_chunks_hybrid(
     target_workspace UUID,
@@ -39,9 +40,12 @@ RETURNS TABLE (
     chunker TEXT
 ) AS $$
     WITH gate AS (
-        SELECT octo.is_workspace_member(target_workspace)
-           AND (octo.current_workspace_id() IS NULL
-                OR octo.current_workspace_id() = target_workspace) AS allowed
+        -- A login role that bypasses row security (the service pool, the owner)
+        -- saw every row before; it still does.
+        SELECT (SELECT r.rolsuper OR r.rolbypassrls FROM pg_roles r WHERE r.rolname = session_user)
+            OR (octo.is_workspace_member(target_workspace)
+                AND (octo.current_workspace_id() IS NULL
+                     OR octo.current_workspace_id() = target_workspace)) AS allowed
     ),
     params AS (
         SELECT (filter_document_ids IS NOT NULL
